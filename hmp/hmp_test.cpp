@@ -31,13 +31,14 @@ public:
 	long fax_xslot;
 
 	DF_IOTT fax_iott;
+	BOOL fax_proceeding;
 	BOOL already_connect_fax;
 	int fax_dir;
 
 	CRN crn;
 
 	int id;
-	CHANNEL(int index) {id = index; already_connect_fax = FALSE;}
+	CHANNEL(int index) {id = index; already_connect_fax = FALSE; fax_proceeding = FALSE;}
 
 	void connect_voice() {
 		print("connect_voice()...");
@@ -182,6 +183,14 @@ public:
 		gc_ReleaseCallEx(crn, EV_ASYNC);
 	}
 	
+	void send_audio_request() {
+		print("send_audio_request()...");	
+		GC_PARM_BLKP gc_parm_blkp = NULL;	
+		gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_SWITCH_CODEC, IPPARM_AUDIO_INITIATE, sizeof(int), NULL);
+		gc_Extension(GCTGT_GCLIB_CRN, crn, IPEXTID_CHANGEMODE, gc_parm_blkp, NULL, EV_ASYNC);		
+		gc_util_delete_parm_blk(gc_parm_blkp);
+	}
+	
 	void send_t38_request() {
 		print("send_t38_request()...");	
 		GC_PARM_BLKP gc_parm_blkp = NULL;	
@@ -190,8 +199,8 @@ public:
 		gc_util_delete_parm_blk(gc_parm_blkp);
 	}
 	
-	void response_t38_request(BOOL accept_call) {
-		print("response_t38_request(%s)...", accept_call?"accept":"reject");
+	void response_codec_request(BOOL accept_call) {
+		print("response_codec_request(%s)...", accept_call?"accept":"reject");
 		GC_PARM_BLKP gc_parm_blkp = NULL;
 		gc_util_insert_parm_val(&gc_parm_blkp, IPSET_SWITCH_CODEC, accept_call?IPPARM_ACCEPT:IPPARM_REJECT, sizeof(int), NULL);
 		gc_Extension(GCTGT_GCLIB_CRN, crn, IPEXTID_CHANGEMODE, gc_parm_blkp, NULL, EV_ASYNC);
@@ -200,9 +209,10 @@ public:
 	
 	void do_fax(int dir) {
 		print("do_fax(%s)...", dir==DF_RX?"RX":"TX");
+		fax_proceeding = TRUE;
 		fax_dir = dir;
 		if (already_connect_fax)
-			response_t38_request(TRUE);
+			response_codec_request(TRUE);
 		else {
 			connect_fax();
 			send_t38_request();
@@ -261,16 +271,22 @@ public:
 	
 	void print_fax_phase_d_info() {		
 		int page_count = ATFX_PGXFER(fax_dev);		
-		print("Phase D Information...\n  Page:%ld, scan lines:%ld;\n  Page width:%ld, resolution:%ld, transferred bytes:%ld;\n  Speed:%ld, bad scan lines:%ld, Retrain negative pages:%ld", 
+		print("Phase D Information...\n  Page:%ld, scan lines:%ld;\n  Page width:%ld, resolution:%ld, transferred bytes:%ld;\n  Speed:%ld, bad scan lines:%ld",//, Retrain negative pages:%ld", 
 		  page_count, ATFX_SCANLINES(fax_dev), ATFX_WIDTH(fax_dev), ATFX_RESLN(fax_dev), ATFX_TRCOUNT(fax_dev), 
-		  ATFX_SPEED(fax_dev), ATFX_BADSCANLINES(fax_dev), ATFX_RTNPAGES(fax_dev));
+		  ATFX_SPEED(fax_dev), ATFX_BADSCANLINES(fax_dev)/*, ATFX_RTNPAGES(fax_dev)*/);
+	}
+
+	void process_fax_done() {
+		dx_fileclose(fax_iott.io_fhandle);
+		restore_voice();
+		already_connect_fax = FALSE;
+		fax_proceeding = FALSE;
 	}
 
 	void process_fax_sent() {
 		print_fax_phase_d_info();
-		dx_fileclose(fax_iott.io_fhandle);
-		restore_voice();
-		already_connect_fax = FALSE;
+		process_fax_done();
+		if (id%2 ==0) send_audio_request(); //single part send audio request
 	}
 
 	void process_fax_received() {
@@ -279,9 +295,8 @@ public:
 
 	void process_fax_error() {
 		print("Phase E status: %d", ATFX_ESTAT(fax_dev));
-		dx_fileclose(fax_iott.io_fhandle);
-		restore_voice();
-		already_connect_fax = FALSE;
+		process_fax_done();
+		if (id%2 ==0) send_audio_request(); //single part send audio request
 	}
 	
 	void process_extension(METAEVENT meta_evt) {	
@@ -305,13 +320,16 @@ public:
 					break;
 				case IPPARM_AUDIO_REQUESTED:
 					print("  IPPARM_AUDIO_REQUESTED:");
+					response_codec_request(TRUE);
 					break;
 				case IPPARM_READY:
 					print("  IPPARM_READY:");
-					if (DF_TX == fax_dir) 
-						send_fax_inner();
-					if (DF_RX == fax_dir)
-						receive_fax_inner();
+					if (TRUE == fax_proceeding) {
+						if (DF_TX == fax_dir) 
+							send_fax_inner();
+						if (DF_RX == fax_dir)
+							receive_fax_inner();
+					}
 					break;
 				default:
 					print("  Got unknown extension parmID %d", parm_datap->parm_ID);
@@ -642,7 +660,7 @@ int main(int argc, char* argv[])
 			case GCEV_ACCEPT:
 				pch->answer_call();
 				break;
-			case GCEV_ANSWERED:				
+			case GCEV_ANSWERED:	
 				//pch->do_fax(DF_TX);
 				break;
 			case GCEV_CALLSTATUS:
@@ -661,7 +679,13 @@ int main(int argc, char* argv[])
 			case GCEV_EXTENSIONCMPLT:
 			case GCEV_EXTENSION:
 				pch->process_extension(meta_evt);
+				break;
+			case GCEV_RELEASECALL:
+				pch->already_connect_fax = FALSE;
+				pch->fax_proceeding = FALSE;
+				break;
 			default:
+				pch->print("unexcepted GC event(0x%x)", evt_code);
 				break;
 			}
 		} else {
@@ -692,6 +716,7 @@ int main(int argc, char* argv[])
 				pch->process_fax_error();
 				break;
 			default:
+				pch->print("unexcepted fax event(0x%x)", evt_code);
 				break;
 			}
 		}
