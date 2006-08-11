@@ -31,13 +31,14 @@ public:
 	long fax_xslot;
 
 	DF_IOTT fax_iott;
-	BOOL fax_proceeding;
-	BOOL already_connect_fax;
 	int fax_dir;
 
 	CRN crn;
 
 	int id;
+	BOOL fax_proceeding;
+	BOOL already_connect_fax;
+
 	CHANNEL(int index) {id = index; already_connect_fax = FALSE; fax_proceeding = FALSE;}
 
 	void connect_voice() {
@@ -225,13 +226,15 @@ public:
 		char fax_file[255] = "";
 		char local_id[255] = "";
 		char fax_header[255] = "";
+		unsigned short tx_coding = DF_MMR|DF_ECM;
 		int fhandle = 0;
 		unsigned long sndflag = EV_ASYNC|DF_PHASEB|DF_PHASED;		
 		fx_initstat(fax_dev, DF_TX);		
 		sprintf(fax_header, "FAX_HEADER_%d", id);
 		fx_setparm(fax_dev, FC_HDRUSER, (void*)fax_header);
 		sprintf(local_id, "FAX_LOCALID_%d", id);
-		fx_setparm(fax_dev, FC_LOCALID, (void*)local_id);		
+		fx_setparm(fax_dev, FC_LOCALID, (void*)local_id);
+//		fx_setparm(fax_dev, FC_TXCODING, (void*)&tx_coding);
 		sprintf(fax_file, TIFFILE);
 		fhandle = dx_fileopen(fax_file, 0x0000|0x8000, NULL);
 		fx_setiott(&fax_iott, fhandle, DF_TIFF, DFC_AUTO);
@@ -266,10 +269,11 @@ public:
 		case DFS_MMR: sprintf(fax_encoding, "DFS_MMR"); break;
 		default: sprintf(fax_encoding, "INVALID(0x%04lx)", rc); break;
 		}
-		print("Connect with \"%s\" at %d baud, with %s encoding", remote_id, ATFX_SPEED(fax_dev), fax_encoding);
+		print("Connect with \"%s\" at %d baud, with %s%s encoding", remote_id, ATFX_SPEED(fax_dev), fax_encoding, 
+			DFS_ECM == ATFX_ECM(fax_dev)?"|DFS_ECM":"");
 	}
 	
-	void print_fax_phase_d_info() {		
+	void print_fax_phase_d_info() {
 		int page_count = ATFX_PGXFER(fax_dev);		
 		print("Phase D Information...\n  Page:%ld, scan lines:%ld;\n  Page width:%ld, resolution:%ld, transferred bytes:%ld;\n  Speed:%ld, bad scan lines:%ld",//, Retrain negative pages:%ld", 
 		  page_count, ATFX_SCANLINES(fax_dev), ATFX_WIDTH(fax_dev), ATFX_RESLN(fax_dev), ATFX_TRCOUNT(fax_dev), 
@@ -286,7 +290,7 @@ public:
 	void process_fax_sent() {
 		print_fax_phase_d_info();
 		process_fax_done();
-		if (id%2 ==0) send_audio_request(); //single part send audio request
+//		if (DF_TX == fax_dir) send_audio_request(); //fax sender send audio request
 	}
 
 	void process_fax_received() {
@@ -296,7 +300,7 @@ public:
 	void process_fax_error() {
 		print("Phase E status: %d", ATFX_ESTAT(fax_dev));
 		process_fax_done();
-		if (id%2 ==0) send_audio_request(); //single part send audio request
+//		if (DF_TX == fax_dir) send_audio_request(); //fax sender send audio request
 	}
 	
 	void process_extension(METAEVENT meta_evt) {	
@@ -674,6 +678,7 @@ int main(int argc, char* argv[])
 				break;
 			case GCEV_DISCONNECTED:
 				pch->print_call_status(meta_evt);
+				pch->restore_voice();
 				pch->drop_call();
 				break;
 			case GCEV_EXTENSIONCMPLT:
@@ -683,6 +688,10 @@ int main(int argc, char* argv[])
 			case GCEV_RELEASECALL:
 				pch->already_connect_fax = FALSE;
 				pch->fax_proceeding = FALSE;
+				break;
+			case GCEV_TASKFAIL:
+				pch->print_call_status(meta_evt);
+				pch->restore_voice();
 				break;
 			default:
 				pch->print("unexcepted GC event(0x%x)", evt_code);
