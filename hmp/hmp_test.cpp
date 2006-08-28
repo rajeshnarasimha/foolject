@@ -51,7 +51,7 @@
 #define CLI_REQ_CONFIRM					"confirm?(%s): "
 #define CLI_REQ_CONFIRM_DEFAULT			"Y"
 #define CLI_REQ_PROXY_IP				"proxy(%s): "
-#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.49"
+#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.101"
 #define CLI_REQ_LOCAL_IP				"local(%s): "
 #define CLI_REQ_LOCAL_IP_DEFAULT		"192.168.101.77"
 #define CLI_REQ_ALIAS					"alias(%s): "
@@ -518,6 +518,8 @@ void enum_dev_information()
 	char dev_name[20] = "";
 	FEATURE_TABLE ft = {0};
 
+	printf("enum_dev_information()...\n");
+
 	sr_getboardcnt(DEV_CLASS_VOICE, &board_count);
 	printf("voice board count=%d.\n", board_count);
 	for (i=1; i<=board_count; i++) {
@@ -601,6 +603,26 @@ void enum_dev_information()
 	printf("enum_dev_information done.\n");
 }
 
+void authentication()
+{
+	GC_PARM_BLKP gc_parm_blkp = NULL;
+	char realm[] = "oakleyding";
+	char identity[] = "sip:192.168.101.101";
+	char username[] = "99";
+	char password [] = "99";
+	IP_AUTHENTICATION auth;
+
+	printf("authentication()...\n");
+	INIT_IP_AUTHENTICATION (&auth);
+	auth.realm = realm;
+	auth.identity = identity;
+	auth.username = username;
+	auth.password = password;
+	gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_CONFIG, IPPARM_AUTHENTICATION_CONFIGURE, (unsigned char)(sizeof(IP_AUTHENTICATION)), &auth);
+	gc_SetAuthenticationInfo(GCTGT_CCLIB_NETIF, board_dev, gc_parm_blkp);
+	gc_util_delete_parm_blk(gc_parm_blkp);
+}
+
 void registration(const char* proxy_ip, const char* local_ip, const char* alias)
 {
 	GC_PARM_BLKP gc_parm_blkp = NULL; 
@@ -610,6 +632,7 @@ void registration(const char* proxy_ip, const char* local_ip, const char* alias)
 
 	if (!registered) {
 		printf("registration()...\n");
+
 		gc_util_insert_parm_val(&gc_parm_blkp, GCSET_SERVREQ, PARM_REQTYPE, sizeof(unsigned char), IP_REQTYPE_REGISTRATION);
 		gc_util_insert_parm_val(&gc_parm_blkp, GCSET_SERVREQ, PARM_ACK, sizeof(unsigned char), IP_REQTYPE_REGISTRATION);
 		gc_util_insert_parm_val(&gc_parm_blkp, IPSET_PROTOCOL, IPPARM_PROTOCOL_BITMASK, sizeof(char), IP_PROTOCOL_SIP);
@@ -646,8 +669,38 @@ void unregistration()
 		gc_util_delete_parm_blk(gc_parm_blkp);
 
 		registered = FALSE;
-	}
+	}	
+}
+
+void global_call_start()
+{
+	GC_START_STRUCT	gclib_start;
+	IPCCLIB_START_DATA cclib_start_data;
+	IP_VIRTBOARD virt_boards[1];
+
+	printf("global_call_start()...\n");
 	
+	memset(&cclib_start_data, 0, sizeof(IPCCLIB_START_DATA));
+	memset(virt_boards, 0, sizeof(IP_VIRTBOARD));
+	INIT_IPCCLIB_START_DATA(&cclib_start_data, 1, virt_boards);
+	INIT_IP_VIRTBOARD(&virt_boards[0]);
+
+	cclib_start_data.delimiter = ',';
+	cclib_start_data.num_boards = 1;
+	cclib_start_data.board_list = virt_boards;
+	
+	virt_boards[0].localIP.ip_ver = IPVER4;					// must be set to IPVER4
+	virt_boards[0].localIP.u_ipaddr.ipv4 = IP_CFG_DEFAULT;	// or specify host NIC IP address
+	virt_boards[0].h323_signaling_port = IP_CFG_DEFAULT;	// or application defined port for H.323 
+	virt_boards[0].sip_signaling_port = IP_CFG_DEFAULT;		// or application defined port for SIP
+	virt_boards[0].sup_serv_mask = IP_SUP_SERV_CALL_XFER;	// Enable SIP Transfer Feature
+	virt_boards[0].sip_msginfo_mask = IP_SIP_MSGINFO_ENABLE;// Enable SIP header
+	virt_boards[0].reserved = NULL;							// must be set to NULL
+	
+	CCLIB_START_STRUCT cclib_start[]={{"GC_DM3CC_LIB", NULL}, {"GC_H3R_LIB", &cclib_start_data}, {"GC_IPM_LIB", NULL}};
+	gclib_start.num_cclibs = 3;
+	gclib_start.cclib_list = cclib_start;		
+	gc_Start(&gclib_start);
 }
 
 void pre_test()
@@ -655,8 +708,8 @@ void pre_test()
 	long request_id = 0;
 	GC_PARM_BLKP gc_parm_blk_p = NULL;
 	
-	gc_Start(NULL);
-	printf("gc_Start() done.\n");
+	global_call_start();
+	printf("global_call_start() done.\n");
 
 	//enum_dev_information();
 
@@ -666,12 +719,12 @@ void pre_test()
 	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_MANUAL_MODE);
 	
 	//Enabling and Disabling Unsolicited Notification Events
-	gc_util_insert_parm_val(&gc_parm_blk_p,
-		IPSET_EXTENSIONEVT_MSK, GCACT_ADDMSK, sizeof(long), 
+	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_EXTENSIONEVT_MSK, GCACT_ADDMSK, sizeof(long), 
 		EXTENSIONEVT_DTMF_ALPHANUMERIC|EXTENSIONEVT_SIGNALING_STATUS|EXTENSIONEVT_STREAMING_STATUS|EXTENSIONEVT_T38_STATUS);
-	gc_SetConfigData(GCTGT_CCLIB_NETIF,
-		board_dev, gc_parm_blk_p, 0, GCUPDATE_IMMEDIATE, &request_id, EV_ASYNC);
+	gc_SetConfigData(GCTGT_CCLIB_NETIF, board_dev, gc_parm_blk_p, 0, GCUPDATE_IMMEDIATE, &request_id, EV_ASYNC);
 	gc_util_delete_parm_blk(gc_parm_blk_p);
+
+	authentication();
 
 	for (int i=0; i<MAX_CHANNELS; i++) {
 		channls[i] = new CHANNEL(i);
@@ -681,14 +734,45 @@ void pre_test()
 
 void post_test()
 {
+	printf("post_test()...\n");
 	unregistration();
-
 	gc_Close(board_dev);
 	for (int i=0; i<MAX_CHANNELS; i++) {
 		channls[i]->close();
 	}
 	gc_Stop();
-	printf("gc_Stop() done.\n");
+}
+
+BOOL gets_quit_if_esc(char* output, unsigned size)
+{
+	char input = 0;
+	unsigned index = 0;
+	while (TRUE) {
+		input = _getche();
+		if (input == 13) {// input ENTER
+			printf("\n");
+			if (index <= size) output[index] = '\0';
+			break;
+		} else if (input == 27) {// input ESC
+			printf("\n");
+			if (index <= size) output[index] = '\0';
+			return TRUE;
+		} else if (input == 8) {// input BACKSAPCE ?
+			if (index > 0) {
+				output[index-1] = '\0';
+				index = index - 2;
+				printf("%c", 0);
+				printf("\b");
+			} else {
+				output[index] = '\0';
+			}
+		} else {
+			if (index < size) output[index] = input;
+			else output[index] = '\0';
+		}
+		index++;
+	}
+	return FALSE;
 }
 
 BOOL analyse_cli()
@@ -698,13 +782,13 @@ BOOL analyse_cli()
 	char ani[GC_ADDRSIZE] = "";
 	char dnis[GC_ADDRSIZE] = "";
 	char fax_file[MAX_PATH] = "";
-	char confirm[256] = "";
+	char confirm[2] = "";
 	char proxy_ip[GC_ADDRSIZE] = "";
 	char local_ip[GC_ADDRSIZE] = "";
 	char alias[GC_ADDRSIZE] = "";
 	
 	if (kbhit()) {
-		gets(input);
+		if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 		if (0 == strnicmp(input, CLI_QUIT, strlen(CLI_QUIT))) 
 		{
 			printf("%s", CLI_QUIT_MSG);
@@ -717,16 +801,16 @@ BOOL analyse_cli()
 		else if (0 == strnicmp(input, CLI_MAKECALL, strlen(CLI_MAKECALL))) 
 		{
 			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
-			gets(input);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			index = atoi(input);
 			if (index>=MAX_CHANNELS || index<0)
 				index = CLI_REQ_INDEX_DEFAULT;
 			printf(CLI_REQ_ANI, CLI_REQ_ANI_DEFAULT);
-			gets(ani);
+			if (gets_quit_if_esc(ani, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 == ani[0])
 				sprintf(ani, "%s", CLI_REQ_ANI_DEFAULT);
 			printf(CLI_REQ_DNIS, CLI_REQ_DNIS_DEFAULT);
-			gets(dnis);
+			if (gets_quit_if_esc(dnis, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 == dnis[0])
 				sprintf(dnis, "%s", CLI_REQ_DNIS_DEFAULT);
 			channls[index]->make_call(ani, dnis);
@@ -734,7 +818,7 @@ BOOL analyse_cli()
 		else if (0 == strnicmp(input, CLI_DROPCALL, strlen(CLI_DROPCALL))) 
 		{
 			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
-			gets(input);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			index = atoi(input);
 			if (index>=MAX_CHANNELS || index<0)
 				index = CLI_REQ_INDEX_DEFAULT;
@@ -743,12 +827,12 @@ BOOL analyse_cli()
 		else if (0 == strnicmp(input, CLI_SENDFAX, strlen(CLI_SENDFAX))) 
 		{
 			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
-			gets(input);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			index = atoi(input);
 			if (index>=MAX_CHANNELS || index<0)
 				index = CLI_REQ_INDEX_DEFAULT;
 			printf(CLI_REQ_FAX_FILE, CLI_REQ_FAX_FILE_DEFAULT);
-			gets(fax_file);
+			if (gets_quit_if_esc(fax_file, MAX_PATH-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 == fax_file[0])
 				sprintf(fax_file, "%s", CLI_REQ_FAX_FILE_DEFAULT);
 			channls[index]->do_fax(DF_TX, fax_file);
@@ -756,7 +840,7 @@ BOOL analyse_cli()
 		else if (0 == strnicmp(input, CLI_RECEIVEFAX, strlen(CLI_RECEIVEFAX))) 
 		{
 			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
-			gets(input);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			index = atoi(input);
 			if (index>=MAX_CHANNELS || index<0)
 				index = CLI_REQ_INDEX_DEFAULT;
@@ -766,11 +850,11 @@ BOOL analyse_cli()
 		{
 			printf("%s", CLI_GLAREFAX_MSG);
 			printf(CLI_REQ_CONFIRM, CLI_REQ_CONFIRM_DEFAULT);
-			gets(confirm);
+			if (gets_quit_if_esc(confirm, 1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 != confirm[0] && 'Y' != confirm[0] && 'y' != confirm[0])
 				return TRUE;
 			printf(CLI_REQ_FAX_FILE, CLI_REQ_FAX_FILE_DEFAULT);
-			gets(fax_file);
+			if (gets_quit_if_esc(fax_file, MAX_PATH-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 == fax_file[0])
 				sprintf(fax_file, "%s", CLI_REQ_FAX_FILE_DEFAULT);
 			channls[0]->do_fax(DF_TX, fax_file);
@@ -779,15 +863,15 @@ BOOL analyse_cli()
 		else if (0 == strnicmp(input, CLI_REGISTER, strlen(CLI_REGISTER)))
 		{
 			printf(CLI_REQ_PROXY_IP, CLI_REQ_PROXY_IP_DEFAULT);
-			gets(proxy_ip);
+			if (gets_quit_if_esc(proxy_ip, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 == proxy_ip[0])
 				sprintf(proxy_ip, "%s", CLI_REQ_PROXY_IP_DEFAULT);
 			printf(CLI_REQ_LOCAL_IP, CLI_REQ_LOCAL_IP_DEFAULT);
-			gets(local_ip);
+			if (gets_quit_if_esc(local_ip, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 == local_ip[0])
 				sprintf(local_ip, "%s", CLI_REQ_LOCAL_IP_DEFAULT);
 			printf(CLI_REQ_ALIAS, CLI_REQ_ALIAS_DEFAULT);
-			gets(alias);
+			if (gets_quit_if_esc(alias, GC_ADDRSIZE-1)) { printf("%s", CLI_HELP_MSG); return TRUE; }
 			if (0 == alias[0])
 				sprintf(alias, "%s", CLI_REQ_ALIAS_DEFAULT);
 			registration(proxy_ip, local_ip, alias);
@@ -956,6 +1040,5 @@ int main(int argc, char* argv[])
 	pre_test();
 	loop();
 	post_test();
-
 	return 0;
 }
