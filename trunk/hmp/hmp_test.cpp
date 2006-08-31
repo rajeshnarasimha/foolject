@@ -17,20 +17,24 @@
 
 #define MAX_CHANNELS					2
 
-#define MAKECALL_DISPLAY				"hmp_test_by_foolbear"
+#define MAKECALL_DISPLAY				"foolbear"
+#define USER_AGENT						"HMp test by foolbear"
 
 #define CLI_QUIT						"quit"
 #define CLI_QUIT_MSG					"HMP test quitting...\n"
 
 #define CLI_HELP						"help"
-#define CLI_HELP_MSG					"HMP test by foolbear, please enter the command: \n\
+#define CLI_HELP_MSG					"%s, please enter the command: \n\
   '%s' for make call, '%s' for drop call, \n\
+  '%s' for blind transfer, '%s' for supervised transfer, \n\
   '%s' for play wave file, '%s' for record wave file, '%s' for stop all, \n\
   '%s' for send fax, '%s' for receive fax, '%s' for 491 REQUEST PENDING demo, \n\
   '%s' for registration, '%s' for un-registration, \n\
   '%s' for print this help message, '%s' for print system status, \n\
   '%s' for quit this test.\n\n"
-#define PRINT_CLI_HELP_MSG printf(CLI_HELP_MSG, CLI_MAKECALL, CLI_DROPCALL, \
+#define PRINT_CLI_HELP_MSG printf(CLI_HELP_MSG, USER_AGENT, \
+  CLI_MAKECALL, CLI_DROPCALL, \
+  CLI_BLIND_XFER, CLI_SUPER_XFER, \
   CLI_PLAYFILE, CLI_RECORDFILE, CLI_STOP, \
   CLI_SENDFAX, CLI_RECEIVEFAX, CLI_GLAREFAX, \
   CLI_REGISTER, CLI_UNREGISTER, \
@@ -39,6 +43,9 @@
 
 #define CLI_MAKECALL					"mc"
 #define CLI_DROPCALL					"dc"
+
+#define CLI_BLIND_XFER					"bx"
+#define CLI_SUPER_XFER					"sx"
 
 #define CLI_PLAYFILE					"pw"
 #define CLI_RECORDFILE					"rw"
@@ -56,28 +63,38 @@
 
 #define CLI_STAT						"stat"
 
-#define CLI_REQ_INDEX					"index(0-%u,%u): "
+#define CLI_REQ_INDEX					"  index(0-%u,%u): "
 #define CLI_REQ_INDEX_DEFAULT			0
-#define CLI_REQ_ANI						"ani(%s): "
+#define CLI_REQ_ANI						"  ani(%s): "
 #define CLI_REQ_ANI_DEFAULT				"99@192.168.101.101"
-#define CLI_REQ_DNIS					"dnis(%s): "
+#define CLI_REQ_DNIS					"  dnis(%s): "
 #define CLI_REQ_DNIS_DEFAULT			"9999@192.168.101.101"
-#define CLI_REQ_WAVE_FILE				"wave file(%s): "
+#define CLI_REQ_CONTACT					"  contact(%s): "
+#define CLI_REQ_CONTACT_DEFAULT			"99@192.168.101.77"
+#define CLI_REQ_WAVE_FILE				"  wave file(%s): "
 #define CLI_REQ_WAVE_FILE_DEFAULT		"play.wav"
-#define CLI_REQ_FAX_FILE				"fax file(%s): "
+#define CLI_REQ_FAX_FILE				"  fax file(%s): "
 #define CLI_REQ_FAX_FILE_DEFAULT		"fax.tif"
-#define CLI_REQ_CONFIRM					"confirm?(%s): "
+#define CLI_REQ_CONFIRM					"  confirm?(%s): "
 #define CLI_REQ_CONFIRM_DEFAULT			"Y"
-#define CLI_REQ_PROXY_IP				"proxy(%s): "
+#define CLI_REQ_PROXY_IP				"  proxy(%s): "
 #define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.101"
-#define CLI_REQ_LOCAL_IP				"local(%s): "
+#define CLI_REQ_LOCAL_IP				"  local(%s): "
 #define CLI_REQ_LOCAL_IP_DEFAULT		"192.168.101.77"
-#define CLI_REQ_ALIAS					"alias(%s): "
+#define CLI_REQ_ALIAS					"  alias(%s): "
 #define CLI_REQ_ALIAS_DEFAULT			"99"
-#define CLI_REQ_PASSWORD				"password(%s): "
+#define CLI_REQ_PASSWORD				"  password(%s): "
 #define CLI_REQ_PASSWORD_DEFAULT		"99"
-#define CLI_REQ_REALM					"realm(%s): "
+#define CLI_REQ_REALM					"  realm(%s): "
 #define CLI_REQ_REALM_DEFAULT			"ewings"
+
+class CHANNEL;
+
+long board_dev = 0;
+BOOL registered = FALSE;
+CHANNEL* channls[MAX_CHANNELS] = {0}; 
+
+int get_idle_channel_id();
 
 class CHANNEL{
 public:
@@ -98,6 +115,7 @@ public:
 	char fax_file[MAX_PATH];
 
 	CRN crn;
+	GCLIB_ADDRESS_BLK* rerouting_addrblkp;
 
 	int id;
 	BOOL fax_proceeding;
@@ -191,29 +209,31 @@ public:
 		char ani[255] = "";
 		char dnis[255] = "";
 		int protocol = CALLPROTOCOL_H323;
-		GC_PARM_BLKP parm_blkp = &(((EXTENSIONEVTBLK*)(meta_evt.extevtdatap))->parmblk);
-		GC_PARM_DATAP parm_datap = NULL;
+		GC_PARM_BLKP gc_parm_blkp = (GC_PARM_BLKP)(meta_evt.extevtdatap);
+		GC_PARM_DATAP gc_parm_datap = NULL;
 		CRN secondary_crn = 0;
 		char transferring_addr[GC_ADDRSIZE] = "";
 
 		gc_GetCallInfo(crn, ORIGINATION_ADDRESS, ani);
 		gc_GetCallInfo(crn, DESTINATION_ADDRESS, dnis);
 		gc_GetCallInfo(crn, CALLPROTOCOL, (char*)&protocol);
-		print("number %s, got %s offer from %s", 
+		print("%s got %s offer from %s", 
 			dnis, protocol==CALLPROTOCOL_H323?"H323":"SIP", ani);
 
-		while (parm_datap = gc_util_next_parm(parm_blkp, parm_datap)) {
-			switch (parm_datap->parm_ID) {
-			case GCPARM_SECONDARYCALL_CRN:
-				memcpy(&secondary_crn, parm_datap->value_buf, parm_datap->value_size);
-				print("GCPARM_SECONDARYCALL_CRN: 0x%x", secondary_crn);
-				break;
-			case GCPARM_TRANSFERRING_ADDR:
-				memcpy(transferring_addr, parm_datap->value_buf, parm_datap->value_size);
-				print("GCPARM_TRANSFERRING_ADDR: %s", transferring_addr);
-				break;
-			default:
-				break;
+		while (gc_parm_datap = gc_util_next_parm(gc_parm_blkp, gc_parm_datap)) {
+			if (GCSET_SUPP_XFER == gc_parm_datap->set_ID) {
+				switch (gc_parm_datap->parm_ID) {
+				case GCPARM_SECONDARYCALL_CRN:
+					memcpy(&secondary_crn, gc_parm_datap->value_buf, gc_parm_datap->value_size);
+					print("  GCPARM_SECONDARYCALL_CRN: 0x%x", secondary_crn);
+					break;
+				case GCPARM_TRANSFERRING_ADDR:
+					memcpy(transferring_addr, gc_parm_datap->value_buf, gc_parm_datap->value_size);
+					print("  GCPARM_TRANSFERRING_ADDR: %s", transferring_addr);
+					break;
+				default:
+					break;
+				}
 			}
 		}
 	}
@@ -259,15 +279,25 @@ public:
 		print_gc_error_info("gc_AnswerCall", gc_AnswerCall(crn, 0, EV_ASYNC));
 	}
 	
-	void make_call(const char* ani, const char* dnis) {
-		print("make_call(%s -> %s)...", ani, dnis);
+	void make_call(const char* ani, const char* dnis, const char* contact) {
 		GC_PARM_BLKP gc_parm_blkp = NULL;
-		GC_MAKECALL_BLK gc_mk_blk;
+		GC_MAKECALL_BLK gc_mk_blk = {0};
 		GCLIB_MAKECALL_BLK gclib_mk_blk = {0};
+		char sip_header[1024] = "";
+
+		print("make_call(%s -> %s)...", ani, dnis);
 		gc_mk_blk.cclib = NULL;
 		gc_mk_blk.gclib = &gclib_mk_blk;
-		//strcpy(gc_mk_blk.gclib->origination.address, ani);
-		//gc_mk_blk.gclib->origination.address_type = GCADDRTYPE_TRANSPARENT;
+
+		sprintf(sip_header, "User-Agent: %s", USER_AGENT); //proprietary header
+		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
+		sprintf(sip_header, "From: <sip:%s>", ani); //From header
+		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
+		sprintf(sip_header, "Contact: <sip:%s>", contact); //Contact header
+		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
+		gc_SetUserInfo(GCTGT_GCLIB_CHAN, gc_dev, gc_parm_blkp, GC_SINGLECALL);
+		gc_util_delete_parm_blk(gc_parm_blkp);
+
 		gc_util_insert_parm_val(&gc_parm_blkp, IPSET_PROTOCOL, IPPARM_PROTOCOL_BITMASK, sizeof(int), IP_PROTOCOL_SIP);
 		gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_CALLINFO, IPPARM_DISPLAY, (unsigned char)(strlen(MAKECALL_DISPLAY)+1), MAKECALL_DISPLAY);
 		gclib_mk_blk.ext_datap = gc_parm_blkp;
@@ -281,6 +311,41 @@ public:
 		if (already_connect_fax)
 			restore_voice();
 		print_gc_error_info("gc_DropCall", gc_DropCall(crn, GC_NORMAL_CLEARING, EV_ASYNC));
+	}
+
+	void blind_xfer(const char* xferred_to) {
+		print("blind_xfer(->%s)...", xferred_to);
+		print_gc_error_info("InvokeXfer", gc_InvokeXfer(crn, 0, (char*)xferred_to, 0, 0, EV_ASYNC));
+	}
+
+	void super_xfer() {
+		print("super_xfer()...");		
+		//gc_InvokeXfer(crn, session[secondaryChannel].crn, 0, 0, 0, EV_ASYNC);
+	}
+	
+	void accept_xfer(METAEVENT meta_evt) {
+		GC_REROUTING_INFO* gc_rerouting_infop = (GC_REROUTING_INFO*)meta_evt.extevtdatap;
+		print("accept_xfer(Refer-To address = %s)...", gc_rerouting_infop->rerouting_num);
+		rerouting_addrblkp = gc_rerouting_infop->rerouting_addrblkp;
+		print_gc_error_info("gc_AcceptXfer", gc_AcceptXfer(crn, 0, EV_ASYNC));
+	}
+	
+	void make_xfer_call() {
+		GC_PARM_BLKP gc_parm_blkp = NULL;
+		GC_MAKECALL_BLK gc_mk_blk = {0};
+		GCLIB_MAKECALL_BLK gclib_mk_blk = {0};
+		int xfer_ch_index = get_idle_channel_id();
+		
+		print("make_xfer_call(xfer_ch_index=%d)...", xfer_ch_index);
+		gc_mk_blk.cclib = NULL;
+		gc_mk_blk.gclib = &gclib_mk_blk;
+		
+		gc_util_insert_parm_val(&gc_parm_blkp, GCSET_SUPP_XFER, GCPARM_PRIMARYCALL_CRN, sizeof(unsigned long), crn);
+		gclib_mk_blk.ext_datap = gc_parm_blkp;
+		gclib_mk_blk.destination = *rerouting_addrblkp;
+		print_gc_error_info("gc_MakeCall", gc_MakeCall(channls[xfer_ch_index]->gc_dev, &channls[xfer_ch_index]->crn,
+			NULL, &gc_mk_blk, 30, EV_ASYNC));
+		gc_util_delete_parm_blk(gc_parm_blkp);
 	}
 
 	void release_call() {
@@ -473,16 +538,16 @@ public:
 	
 	void process_extension(METAEVENT meta_evt) {	
 		GC_PARM_BLKP gc_parm_blkp = &(((EXTENSIONEVTBLK*)(meta_evt.extevtdatap))->parmblk);
-		GC_PARM_DATA* parm_datap = NULL;
+		GC_PARM_DATA* gc_parm_datap = NULL;
 		IP_CAPABILITY* ip_capp = NULL;
 		RTP_ADDR rtp_addr;
 		struct in_addr ip_addr;
 
-		while (parm_datap = gc_util_next_parm(gc_parm_blkp, parm_datap)) {
-			switch(parm_datap->set_ID) {
+		while (gc_parm_datap = gc_util_next_parm(gc_parm_blkp, gc_parm_datap)) {
+			switch(gc_parm_datap->set_ID) {
 			case IPSET_SWITCH_CODEC:
 				print("IPSET_SWITCH_CODEC:");
-				switch(parm_datap->parm_ID) {
+				switch(gc_parm_datap->parm_ID) {
 				case IPPARM_T38_REQUESTED:
 					print("  IPPARM_T38_REQUESTED:");
 					if (!already_connect_fax) {
@@ -504,13 +569,13 @@ public:
 					}
 					break;
 				default:
-					print("  Got unknown extension parmID %d", parm_datap->parm_ID);
+					print("  Got unknown extension parmID %d", gc_parm_datap->parm_ID);
 					break;
 				}
 				break;				
 			case IPSET_MEDIA_STATE:
 				print("IPSET_MEDIA_STATE:");
-				switch(parm_datap->parm_ID) {
+				switch(gc_parm_datap->parm_ID) {
 				case IPPARM_TX_CONNECTED:
 					print("  IPPARM_TX_CONNECTED");
 					break;
@@ -524,18 +589,18 @@ public:
 					print("  IPPARM_RX_DISCONNECTED");
 					break;
 				default:
-					print("  Got unknown extension parmID %d", parm_datap->parm_ID);
+					print("  Got unknown extension parmID %d", gc_parm_datap->parm_ID);
 					break;
 				}
-				if (sizeof(IP_CAPABILITY) == parm_datap->value_size) {
-					ip_capp = (IP_CAPABILITY*)(parm_datap->value_buf);
+				if (sizeof(IP_CAPABILITY) == gc_parm_datap->value_size) {
+					ip_capp = (IP_CAPABILITY*)(gc_parm_datap->value_buf);
 					print("    stream codec infomation for TX: capability(%d), dir(%d), frames_per_pkt(%d), VAD(%d)", 
 						ip_capp->capability, ip_capp->direction, ip_capp->extra.audio.frames_per_pkt, ip_capp->extra.audio.VAD);
 				}
 				break;
 			case IPSET_IPPROTOCOL_STATE:
 				print("IPSET_IPPROTOCOL_STATE:");
-				switch(parm_datap->parm_ID) {
+				switch(gc_parm_datap->parm_ID) {
 				case IPPARM_SIGNALING_CONNECTED:
 					print("  IPPARM_SIGNALING_CONNECTED");
 					break;
@@ -549,30 +614,30 @@ public:
 					print("  IPPARM_CONTROL_DISCONNECTED");
 					break;
 				default:
-					print("  Got unknown extension parmID %d", parm_datap->parm_ID);
+					print("  Got unknown extension parmID %d", gc_parm_datap->parm_ID);
 					break;
 				}
 				break;
 			case IPSET_RTP_ADDRESS:
 				print("IPSET_RTP_ADDRESS:");			
-				switch(parm_datap->parm_ID) {
+				switch(gc_parm_datap->parm_ID) {
 				case IPPARM_LOCAL:
-					memcpy(&rtp_addr, parm_datap->value_buf, parm_datap->value_size);
+					memcpy(&rtp_addr, gc_parm_datap->value_buf, gc_parm_datap->value_size);
 					ip_addr.S_un.S_addr = rtp_addr.u_ipaddr.ipv4;
 					print("  IPPARM_LOCAL: address:%s, port %d", inet_ntoa(ip_addr), rtp_addr.port);
 					break;
 				case IPPARM_REMOTE:
-					memcpy(&rtp_addr, parm_datap->value_buf, parm_datap->value_size);
+					memcpy(&rtp_addr, gc_parm_datap->value_buf, gc_parm_datap->value_size);
 					ip_addr.S_un.S_addr = rtp_addr.u_ipaddr.ipv4;
 					print("  IPPARM_REMOTE: address:%s, port %d", inet_ntoa(ip_addr), rtp_addr.port);
 					break;
 				default:
-					print("  Got unknown extension parmID %d", parm_datap->parm_ID);
+					print("  Got unknown extension parmID %d", gc_parm_datap->parm_ID);
 					break;
 				}
 				break;				
 			default:
-				print("Got unknown set_ID(%d).", parm_datap->set_ID);
+				print("Got unknown set_ID(%d).", gc_parm_datap->set_ID);
 				break;
 			}
 		}
@@ -627,10 +692,6 @@ public:
 		printf("%02d:%02d:%02d.%04d CH %d: %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, id, buf);
 	}
 };
-
-long board_dev = 0;
-BOOL registered = FALSE;
-CHANNEL* channls[MAX_CHANNELS] = {0}; 
 
 void enum_dev_information()
 {
@@ -800,6 +861,14 @@ void unregistration()
 	}	
 }
 
+int get_idle_channel_id(){
+	for (unsigned index=0; index<MAX_CHANNELS; index++) {
+		if (0 == channls[index]->crn)
+			return index;
+	}
+	return -1;
+}
+
 void print_sys_status()
 {
 	int status = 0;
@@ -813,6 +882,19 @@ void print_sys_status()
 		}
 	}
 	printf("  %sregistered.\n", TRUE == registered?"":"NOT ");
+}
+
+void print_alarm_info(METAEVENT meta_evt)
+{
+	long alarm_number = 0;
+	char* alarm_name = NULL;
+	unsigned long alarm_source_object_id = 0;
+	char* alarm_source_object_name = NULL;
+	gc_AlarmNumber(&meta_evt, &alarm_number); // Will be of type TYPE_LAN_DISCONNECT = 0x01 or TYPE_LAN_DISCONNECT + 0x10 (LAN connected).
+	gc_AlarmName(&meta_evt, &alarm_name); // Will be "Lan Cable Disconnected" or "Lan cable connected".
+	gc_AlarmSourceObjectID(&meta_evt, &alarm_source_object_id); // Will usually be 7.
+	gc_AlarmSourceObjectName(&meta_evt, &alarm_source_object_name); // Will be IPCCLIBAsoId.
+	printf("  Alarm: %s(0x%lx) occurred on ASO %s(%d)\n", alarm_name, alarm_number, alarm_source_object_name, (int) alarm_source_object_id);
 }
 
 void global_call_start()
@@ -831,13 +913,14 @@ void global_call_start()
 	cclib_start_data.delimiter = ',';
 	cclib_start_data.num_boards = 1;
 	cclib_start_data.board_list = virt_boards;
+	cclib_start_data.max_parm_data_size = 1024;				// set maximum SIP header length to 1k
 	
 	virt_boards[0].localIP.ip_ver = IPVER4;					// must be set to IPVER4
 	virt_boards[0].localIP.u_ipaddr.ipv4 = IP_CFG_DEFAULT;	// or specify host NIC IP address
 	virt_boards[0].h323_signaling_port = IP_CFG_DEFAULT;	// or application defined port for H.323 
 	virt_boards[0].sip_signaling_port = IP_CFG_DEFAULT;		// or application defined port for SIP
 	virt_boards[0].sup_serv_mask = IP_SUP_SERV_CALL_XFER;	// Enable SIP Transfer Feature
-	virt_boards[0].sip_msginfo_mask = IP_SIP_MSGINFO_ENABLE;// Enable SIP header
+	virt_boards[0].sip_msginfo_mask = IP_SIP_MSGINFO_ENABLE;// Enabling Access to SIP Header Information
 	virt_boards[0].reserved = NULL;							// must be set to NULL
 	
 	CCLIB_START_STRUCT cclib_start[]={{"GC_DM3CC_LIB", NULL}, {"GC_H3R_LIB", &cclib_start_data}, {"GC_IPM_LIB", NULL}};
@@ -857,6 +940,9 @@ void pre_test()
 	//enum_dev_information();
 
 	gc_OpenEx(&board_dev, ":N_iptB1:P_IP", EV_SYNC, NULL);
+
+	// Enable Alarm notification on the board handle with generic ASO ID
+	gc_SetAlarmNotifyAll(board_dev, ALARM_SOURCE_ID_NETWORK_ID, ALARM_NOTIFY);
 
 	//setting T.38 fax server operating mode: IP MANUAL mode
 	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_MANUAL_MODE);
@@ -922,6 +1008,7 @@ BOOL analyse_cli()
 	unsigned index = 0;
 	char ani[GC_ADDRSIZE] = "";
 	char dnis[GC_ADDRSIZE] = "";
+	char contact[GC_ADDRSIZE] = "";
 	char file[MAX_PATH] = "";
 	char confirm[2] = "";
 	char proxy_ip[GC_ADDRSIZE] = "";
@@ -956,7 +1043,11 @@ BOOL analyse_cli()
 			if (gets_quit_if_esc(dnis, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
 			if (0 == dnis[0])
 				sprintf(dnis, "%s", CLI_REQ_DNIS_DEFAULT);
-			channls[index]->make_call(ani, dnis);
+			printf(CLI_REQ_CONTACT, CLI_REQ_CONTACT_DEFAULT);
+			if (gets_quit_if_esc(contact, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+			if (0 == contact[0])
+				sprintf(contact, "%s", CLI_REQ_CONTACT_DEFAULT);
+			channls[index]->make_call(ani, dnis, contact);
 		} 
 		else if (0 == strnicmp(input, CLI_DROPCALL, strlen(CLI_DROPCALL))) 
 		{
@@ -967,6 +1058,28 @@ BOOL analyse_cli()
 				index = CLI_REQ_INDEX_DEFAULT;
 			channls[index]->drop_call();
 		} 
+		else if (0 == strnicmp(input, CLI_BLIND_XFER, strlen(CLI_BLIND_XFER))) 
+		{
+			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+			index = atoi(input);
+			if (index>=MAX_CHANNELS || index<0)
+				index = CLI_REQ_INDEX_DEFAULT;
+			printf(CLI_REQ_DNIS, CLI_REQ_DNIS_DEFAULT);
+			if (gets_quit_if_esc(dnis, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+			if (0 == dnis[0])
+				sprintf(dnis, "%s", CLI_REQ_DNIS_DEFAULT);
+			channls[index]->blind_xfer(dnis);
+		} 
+		else if (0 == strnicmp(input, CLI_SUPER_XFER, strlen(CLI_SUPER_XFER))) 
+		{
+			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+			index = atoi(input);
+			if (index>=MAX_CHANNELS || index<0)
+				index = CLI_REQ_INDEX_DEFAULT;
+			channls[index]->super_xfer();
+		}    
 		else if (0 == strnicmp(input, CLI_PLAYFILE, strlen(CLI_PLAYFILE))) 
 		{
 			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
@@ -1102,12 +1215,16 @@ void loop()
 		gc_GetMetaEventEx(&meta_evt, event_handle);
 		if (meta_evt.flags & GCME_GC_EVENT) {
 
-			//for register
+			//for Host Signaling LAN Disconnection Alarm
+			if (evt_dev == board_dev && GCEV_ALARM == meta_evt.evttype) {
+				print_alarm_info(meta_evt);
+			}
+
+			//for proxy register
 			if (evt_dev == board_dev && GCEV_SERVICERESP == meta_evt.evttype) {
 				gc_parm_blkp = (GC_PARM_BLKP)(meta_evt.extevtdatap);
-				gc_parm_datap = gc_util_next_parm(gc_parm_blkp, gc_parm_datap);
 				
-				while(NULL != gc_parm_datap) {
+				while(gc_parm_datap = gc_util_next_parm(gc_parm_blkp, gc_parm_datap)) {
 					if (IPSET_REG_INFO == gc_parm_datap->set_ID) {					
 						if (IPPARM_REG_STATUS == gc_parm_datap->parm_ID) {
 							value = (int)(gc_parm_datap->value_buf[0]);
@@ -1126,7 +1243,6 @@ void loop()
 							printf("IPSET_REG_INFO/IPPARM_REG_SERVICEID: 0x%x\n", value);
 						}
 					}
-					gc_parm_datap = gc_util_next_parm(gc_parm_blkp, gc_parm_datap);
 				}
 				continue;
 			}
@@ -1187,7 +1303,14 @@ void loop()
 				if (TRUE == pch->fax_proceeding)
 					pch->restore_voice();
 				break;
+			case GCEV_REQ_XFER:
+				pch->accept_xfer(meta_evt);
+				break;
+			case GCEV_ACCEPT_XFER:
+				pch->make_xfer_call();
+				break;
 			default:
+				pch->print_call_status(meta_evt);
 				break;
 			}
 		} else {
