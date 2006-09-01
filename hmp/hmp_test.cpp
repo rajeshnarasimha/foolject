@@ -18,7 +18,9 @@
 #define MAX_CHANNELS					2
 
 #define MAKECALL_DISPLAY				"foolbear"
-#define USER_AGENT						"HMp test by foolbear"
+#define USER_AGENT						"HMP test by foolbear"
+
+#define CLI_BACK						"back"
 
 #define CLI_QUIT						"quit"
 #define CLI_QUIT_MSG					"HMP test quitting...\n"
@@ -65,6 +67,8 @@
 
 #define CLI_REQ_INDEX					"  index(0-%u,%u): "
 #define CLI_REQ_INDEX_DEFAULT			0
+#define CLI_REQ_INDEX_2ND				"  index 2nd(0-%u,%u): "
+#define CLI_REQ_INDEX_2ND_DEFAULT		1
 #define CLI_REQ_ANI						"  ani(%s): "
 #define CLI_REQ_ANI_DEFAULT				"99@192.168.101.101"
 #define CLI_REQ_DNIS					"  dnis(%s): "
@@ -116,6 +120,7 @@ public:
 
 	CRN crn;
 	GCLIB_ADDRESS_BLK* rerouting_addrblkp;
+	int super_xfer_primary_ch_index;
 
 	int id;
 	BOOL fax_proceeding;
@@ -162,13 +167,13 @@ public:
 		IP_CONNECT ip_connect;
 		GC_PARM_BLKP gc_parm_blkp = NULL;
 		gc_UnListen(gc_dev, EV_SYNC);
-		ip_connect.version = 0x100;
+		/*ip_connect.version = 0x100;
 		ip_connect.mediaHandle = ipm_dev;
 		ip_connect.faxHandle = fax_dev;
 		ip_connect.connectType = IP_FULLDUP;
 		gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_FOIP, IPPARM_T38_CONNECT, sizeof(IP_CONNECT), (void*)(&ip_connect));
 		gc_SetUserInfo(GCTGT_GCLIB_CRN, crn, gc_parm_blkp, GC_SINGLECALL);
-		gc_util_delete_parm_blk(gc_parm_blkp);
+		gc_util_delete_parm_blk(gc_parm_blkp);*/
 	}
 	
 	void restore_voice() {
@@ -318,9 +323,15 @@ public:
 		print_gc_error_info("InvokeXfer", gc_InvokeXfer(crn, 0, (char*)xferred_to, 0, 0, EV_ASYNC));
 	}
 
+	void init_super_xfer(int secondary_ch_index) {
+		print("init_super_xfer(with %d)...", secondary_ch_index);
+		channls[secondary_ch_index]->super_xfer_primary_ch_index = id;
+		print_gc_error_info("g_InitXfer", gc_InitXfer(channls[secondary_ch_index]->crn, NULL, NULL, EV_ASYNC));
+	}
+
 	void super_xfer() {
-		print("super_xfer()...");		
-		//gc_InvokeXfer(crn, session[secondaryChannel].crn, 0, 0, 0, EV_ASYNC);
+		print("super_xfer()...");
+		print_gc_error_info("gc_InvokeXfer", gc_InvokeXfer(channls[super_xfer_primary_ch_index]->crn, crn, 0, 0, 0, EV_ASYNC));
 	}
 	
 	void accept_xfer(METAEVENT meta_evt) {
@@ -442,12 +453,18 @@ public:
 		fax_proceeding = TRUE;
 		fax_dir = dir;
 		sprintf(fax_file, "%s", NULL==file?"":file);
-		if (already_connect_fax)
+		/*if (already_connect_fax)
 			response_codec_request(TRUE);
 		else {
 			connect_fax();
 			send_t38_request();
 			already_connect_fax = TRUE;
+		}*/
+		connect_fax();
+		if (DF_RX == dir) {
+			receive_fax_inner();
+		} else {
+			send_fax_inner();
 		}
 	}
 	
@@ -464,7 +481,7 @@ public:
 		sprintf(local_id, "FAX_LOCALID_%d", id);
 		fx_setparm(fax_dev, FC_LOCALID, (void*)local_id);
 //		fx_setparm(fax_dev, FC_TXCODING, (void*)&tx_coding);
-		fhandle = dx_fileopen(fax_file, 0x0000|0x8000, NULL);
+		fhandle = dx_fileopen(fax_file, _O_RDONLY|_O_BINARY, NULL);
 		fx_setiott(&fax_iott, fhandle, DF_TIFF, DFC_AUTO);
 		fax_iott.io_type |= IO_EOT;
 		fax_iott.io_phdcont = DFC_EOP;
@@ -972,7 +989,7 @@ void post_test()
 
 BOOL gets_quit_if_esc(char* output, unsigned size)
 {
-	char input = 0;
+	/*char input = 0;
 	unsigned index = 0;
 	while (TRUE) {
 		input = _getche();
@@ -999,13 +1016,16 @@ BOOL gets_quit_if_esc(char* output, unsigned size)
 		}
 		index++;
 	}
-	return FALSE;
+	return FALSE;*/
+	gets(output);
+	return (0 == strnicmp(output, CLI_BACK, strlen(CLI_BACK)))?TRUE:FALSE;
 }
 
 BOOL analyse_cli()
 {
 	char input[GC_ADDRSIZE] = "";
 	unsigned index = 0;
+	unsigned index_2nd = 0;
 	char ani[GC_ADDRSIZE] = "";
 	char dnis[GC_ADDRSIZE] = "";
 	char contact[GC_ADDRSIZE] = "";
@@ -1078,7 +1098,12 @@ BOOL analyse_cli()
 			index = atoi(input);
 			if (index>=MAX_CHANNELS || index<0)
 				index = CLI_REQ_INDEX_DEFAULT;
-			channls[index]->super_xfer();
+			printf(CLI_REQ_INDEX_2ND, MAX_CHANNELS-1, CLI_REQ_INDEX_2ND_DEFAULT);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+			index_2nd = atoi(input);
+			if (index_2nd>=MAX_CHANNELS || index_2nd<0)
+				index_2nd = CLI_REQ_INDEX_2ND_DEFAULT;
+			channls[index]->init_super_xfer(index_2nd);
 		}    
 		else if (0 == strnicmp(input, CLI_PLAYFILE, strlen(CLI_PLAYFILE))) 
 		{
@@ -1308,6 +1333,9 @@ void loop()
 				break;
 			case GCEV_ACCEPT_XFER:
 				pch->make_xfer_call();
+				break;
+			case GCEV_INIT_XFER:
+				pch->super_xfer();
 				break;
 			default:
 				pch->print_call_status(meta_evt);
