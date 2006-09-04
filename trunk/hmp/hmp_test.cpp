@@ -17,7 +17,7 @@
 #include <ipmlib.h>
 
 #define MAX_CHANNELS					2
-#define USING_V17_PCM_FAX					FALSE
+#define USING_V17_PCM_FAX				TRUE
 
 #define MAKECALL_DISPLAY				"foolbear"
 #define USER_AGENT						"HMP test by foolbear"
@@ -136,7 +136,6 @@ public:
 		char dev_name[64] = "";
 		long request_id = 0;
 		GC_PARM_BLKP gc_parm_blkp = NULL;
-		SC_TSINFO sc_tsinfo;
 
 		sprintf(dev_name, "dxxxB1C%d", id+1);
 		vox_dev = dx_open(dev_name, NULL);
@@ -145,20 +144,6 @@ public:
 		fax_dev = fx_open(dev_name, NULL);
 		sprintf(dev_name, ":N_iptB1T%d:P_SIP:M_ipmB1C%d", id+1, id+1);
 		gc_OpenEx(&gc_dev, dev_name, EV_ASYNC, (void*)this);
-		gc_GetResourceH(gc_dev, &ipm_dev, GC_MEDIADEVICE);
-
-		sc_tsinfo.sc_numts = 1;
-		sc_tsinfo.sc_tsarrayp = &gc_xslot;
-		gc_GetXmitSlot(gc_dev, &sc_tsinfo);
-		sc_tsinfo.sc_numts = 1;
-		sc_tsinfo.sc_tsarrayp = &ipm_xslot;
-		ipm_GetXmitSlot(ipm_dev, &sc_tsinfo, EV_SYNC);
-		sc_tsinfo.sc_numts = 1;
-		sc_tsinfo.sc_tsarrayp = &vox_xslot;
-		dx_getxmitslot(vox_dev, &sc_tsinfo);
-		sc_tsinfo.sc_numts = 1;
-		sc_tsinfo.sc_tsarrayp = &fax_xslot;
-		fx_getxmitslot(fax_dev, &sc_tsinfo);
 
 		//Enabling GCEV_INVOKE_XFER_ACCEPTED Events
 		gc_util_insert_parm_val(&gc_parm_blkp, GCSET_CALLEVENT_MSK, GCACT_ADDMSK, sizeof(long), GCMSK_INVOKEXFER_ACCEPTED);
@@ -166,15 +151,24 @@ public:
 		gc_util_delete_parm_blk(gc_parm_blkp);
 	}
 
-	void connect_voice() {
-		SC_TSINFO sc_tsinfo;
+	void connect_voice() {		
 		print("connect_voice()...");
+		SC_TSINFO sc_tsinfo;
+		gc_GetResourceH(gc_dev, &ipm_dev, GC_MEDIADEVICE);
 		sc_tsinfo.sc_numts = 1;
 		sc_tsinfo.sc_tsarrayp = &gc_xslot;
+		gc_GetXmitSlot(gc_dev, &sc_tsinfo);
 		dx_listen(vox_dev, &sc_tsinfo);
 		sc_tsinfo.sc_numts = 1;
 		sc_tsinfo.sc_tsarrayp = &vox_xslot;
+		dx_getxmitslot(vox_dev, &sc_tsinfo);
 		gc_Listen(gc_dev, &sc_tsinfo, EV_SYNC);
+		sc_tsinfo.sc_numts = 1;
+		sc_tsinfo.sc_tsarrayp = &ipm_xslot;
+		ipm_GetXmitSlot(ipm_dev, &sc_tsinfo, EV_SYNC);
+		sc_tsinfo.sc_numts = 1;
+		sc_tsinfo.sc_tsarrayp = &fax_xslot;
+		fx_getxmitslot(fax_dev, &sc_tsinfo);
 	}
 	
 	void connect_fax() {
@@ -283,7 +277,7 @@ public:
 			call_status_info.additionalInfo);
 	}
 
-	void print_gc_error_info(const char *func_name, int func_return) {
+	void print_gc_error_info(const char* func_name, int func_return) {
 		GC_INFO gc_error_info;
 		if (GC_ERROR == func_return) {
 			gc_ErrorInfo(&gc_error_info);
@@ -292,6 +286,23 @@ public:
 				gc_error_info.ccLibId, gc_error_info.ccLibName,
 				gc_error_info.ccValue, gc_error_info.ccMsg, 
 				gc_error_info.additionalInfo);
+		}
+	}
+
+	void print_r4_error_info(const char* func_name, int dev, int func_return) {
+		long lasterr = 0;
+		if (-1 == func_return) {
+			lasterr = ATDV_LASTERR(dev);
+			if (EDX_SYSTEM == lasterr) {
+				print("%s return %d, dev=0x%lX, ATDV_LASTERR=%d[SYSTEM ERROR], errno=%d\n  ATDV_ERRMSGP=%s",
+					func_name, func_return, dev, lasterr, errno, ATDV_ERRMSGP(dev));
+			} else if (EDX_BADPARM == lasterr) {
+				print("%s return %d, dev=0x%lX, ATDV_LASTERR=%d[BAD PARAMETER]\n  ATDV_ERRMSGP=%s",
+					func_name, func_return, dev, lasterr, ATDV_ERRMSGP(dev));
+			} else {
+				print("%s return %d, dev=0x%lX, ATDV_LASTERR=%d\n  ATDV_ERRMSGP=%s",
+					func_name, func_return, dev, lasterr, ATDV_ERRMSGP(dev));
+			}
 		}
 	}
 
@@ -410,7 +421,7 @@ public:
 		vox_iott.io_offset = 0;
 		vox_iott.io_length = -1;
 		dx_clrdigbuf(vox_dev);
-		dx_playiottdata(vox_dev, &vox_iott, &tpt, &xpb, EV_ASYNC);
+		print_r4_error_info("dx_playiottdata", vox_dev, dx_playiottdata(vox_dev, &vox_iott, &tpt, &xpb, EV_ASYNC));
 	}
 
 	void record_wave_file() {
@@ -425,7 +436,7 @@ public:
 		xpb.wDataFormat = DATA_FORMAT_MULAW;
 		xpb.nSamplesPerSec = DRT_8KHZ;
 		xpb.wBitsPerSample = 8;
-		GetSystemTime(&t);
+		GetLocalTime(&t);
 		sprintf(file, "record_wave_ch%d_timeD%02dH%02dM%02dS%02d.%04d.wav", id, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
 		vox_iott.io_fhandle = dx_fileopen(file, _O_RDWR|_O_BINARY|_O_CREAT|_O_TRUNC, 0666);
 		vox_iott.io_type = IO_DEV|IO_EOT;
@@ -433,13 +444,14 @@ public:
 		vox_iott.io_offset = 0;
 		vox_iott.io_length = -1;
 		dx_clrdigbuf(vox_dev);
-		dx_reciottdata(vox_dev, &vox_iott, &tpt, &xpb, EV_ASYNC|RM_TONE);
+		print_r4_error_info("dx_reciottdata", vox_dev, dx_reciottdata(vox_dev, &vox_iott, &tpt, &xpb, EV_ASYNC|RM_TONE));
 	}
 
 	void process_voice_done() {
 		print_voice_done_terminal_reason();
 		dx_clrtpt(&tpt, 1);
 		dx_fileclose(vox_iott.io_fhandle);
+		vox_iott.io_fhandle = -1;
 	}
 
 	void print_voice_done_terminal_reason() {
@@ -528,7 +540,7 @@ public:
 		SYSTEMTIME t;
 		unsigned long rcvflag = EV_ASYNC|DF_PHASEB|DF_PHASED|DF_TIFF|DF_A4MAXLEN;
 		fx_initstat(fax_dev, DF_RX);
-		GetSystemTime(&t);
+		GetLocalTime(&t);
 		sprintf(fax_file, "receive_fax_ch%d_timeD%02dH%02dM%02dS%02d.%04d.tif", id, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
 		sprintf(local_id, "FAX_LOCALID_%d", id);
 		fx_setparm(fax_dev, FC_LOCALID, (void*)local_id);		
@@ -739,7 +751,7 @@ public:
 		_vsnprintf(buf, 1023, format, argptr);
 		buf[1023] = '\0';
 		va_end(argptr);		
-		GetSystemTime(&t);
+		GetLocalTime(&t);
 		printf("%02d:%02d:%02d.%04d CH %d: %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, id, buf);
 	}
 };
@@ -760,17 +772,17 @@ void enum_dev_information()
 	printf("enum_dev_information()...\n");
 
 	sr_getboardcnt(DEV_CLASS_VOICE, &board_count);
-	printf("voice board count=%d.\n", board_count);
+	printf("  voice board count=%d.\n", board_count);
 	for (i=1; i<=board_count; i++) {
 		sprintf(board_name, "dxxxB%d", i);
 		handle = dx_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tvoice board %s has %d sub-devs.\n", board_name, sub_dev_count);
+		printf("    voice board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		for (j=1; j<=sub_dev_count; j++) {
 			sprintf(dev_name, "dxxxB%dC%d", i, j);
 			dev_handle = dx_open(dev_name, 0);
 			dx_getfeaturelist(dev_handle, &ft);
-			printf("\t\t%s %ssupport fax, %ssupport T38 fax, %ssupport CSP.\n", dev_name, 
+			printf("      %s %ssupport fax, %ssupport T38 fax, %ssupport CSP.\n", dev_name, 
 				(ft.ft_fax & FT_FAX)?"":"NOT ",
 				(ft.ft_fax & FT_FAX_T38UDP)?"":"NOT ", 
 				(ft.ft_e2p_brd_cfg & FT_CSP)?"":"NOT ");
@@ -780,37 +792,37 @@ void enum_dev_information()
 	}
 	
 	sr_getboardcnt(DEV_CLASS_DTI, &board_count);
-	printf("dti board count=%d.\n", board_count);
+	printf("  dti board count=%d.\n", board_count);
 	for (i=1; i<=board_count; i++) {
 		sprintf(board_name, "dtiB%d", i);
 		handle = dt_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tdti board %s has %d sub-devs.\n", board_name, sub_dev_count);
+		printf("    dti board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		dt_close(handle);
 	}
 	
 	sr_getboardcnt(DEV_CLASS_MSI, &board_count);
-	printf("msi board count=%d.\n", board_count);
+	printf("  msi board count=%d.\n", board_count);
 	for (i=1; i<=board_count; i++) {
 		sprintf(board_name, "msiB%d", i);
 		handle = ms_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tmsi board %s has %d sub-devs.\n", board_name, sub_dev_count);
+		printf("    msi board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		ms_close(handle);
 	}
 
 	sr_getboardcnt(DEV_CLASS_DCB, &board_count);
-	printf("dcb board count=%d.\n", board_count);
+	printf("  dcb board count=%d.\n", board_count);
 	for (i=1; i<=board_count; i++) {
 		sprintf(board_name, "dcbB%d", i);
 		handle = dcb_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tdcb board %s has %d sub-devs(DSP).\n", board_name, sub_dev_count);
+		printf("    dcb board %s has %d sub-devs(DSP).\n", board_name, sub_dev_count);
 		for (j=1; j<=sub_dev_count; j++) {
 			sprintf(dev_name, "%sD%d", board_name, j);
 			dev_handle = dcb_open(dev_name, 0);
 			dcb_dsprescount(dev_handle, &dsp_resource_count);
-			printf("\t\tDSP %s has %d conference resource.\n", dev_name, dsp_resource_count);
+			printf("      DSP %s has %d conference resource.\n", dev_name, dsp_resource_count);
 			dcb_close(dev_handle);
 		}
 		dcb_close(handle);
@@ -820,22 +832,22 @@ void enum_dev_information()
 	//	DEV_CLASS_AUDIO_IN	
 
 	sr_getboardcnt(DEV_CLASS_IPT, &board_count);
-	printf("ipt board count=%d.\n", board_count);
+	printf("  ipt board count=%d.\n", board_count);
 	for (i=1; i<=board_count; i++) {
 		sprintf(board_name, ":N_iptB%d:P_IP", i);
 		gc_OpenEx(&handle, board_name, EV_SYNC, NULL);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tipt board %s has %d sub-devs.\n", board_name, sub_dev_count);
+		printf("    ipt board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		gc_Close(handle);
 	}
 
 	sr_getboardcnt("IPM", &board_count);
-	printf("ipm board count=%d.\n", board_count);
+	printf("  ipm board count=%d.\n", board_count);
 	for (i=1; i<=board_count; i++) {
 		sprintf(board_name, ":M_ipmB%d", i);
 		gc_OpenEx(&handle, board_name, EV_SYNC, NULL);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tipm board %s has %d sub-devs.\n", board_name, sub_dev_count);
+		printf("    ipm board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		gc_Close(handle);
 	}
 }
