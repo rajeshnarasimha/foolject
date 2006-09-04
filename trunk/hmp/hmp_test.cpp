@@ -14,8 +14,10 @@
 //#include <scxlib.h>
 #include <gcip_defs.h>
 #include <gcip.h>
+#include <ipmlib.h>
 
 #define MAX_CHANNELS					2
+#define USING_V17_PCM_FAX					FALSE
 
 #define MAKECALL_DISPLAY				"foolbear"
 #define USER_AGENT						"HMP test by foolbear"
@@ -70,9 +72,9 @@
 #define CLI_REQ_INDEX_2ND				"  index 2nd(0-%u,%u): "
 #define CLI_REQ_INDEX_2ND_DEFAULT		1
 #define CLI_REQ_ANI						"  ani(%s): "
-#define CLI_REQ_ANI_DEFAULT				"99@192.168.101.101"
+#define CLI_REQ_ANI_DEFAULT				"99@192.168.101.58"
 #define CLI_REQ_DNIS					"  dnis(%s): "
-#define CLI_REQ_DNIS_DEFAULT			"9999@192.168.101.101"
+#define CLI_REQ_DNIS_DEFAULT			"9999@192.168.101.58"
 #define CLI_REQ_CONTACT					"  contact(%s): "
 #define CLI_REQ_CONTACT_DEFAULT			"99@192.168.101.77"
 #define CLI_REQ_WAVE_FILE				"  wave file(%s): "
@@ -82,7 +84,7 @@
 #define CLI_REQ_CONFIRM					"  confirm?(%s): "
 #define CLI_REQ_CONFIRM_DEFAULT			"Y"
 #define CLI_REQ_PROXY_IP				"  proxy(%s): "
-#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.101"
+#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.58"
 #define CLI_REQ_LOCAL_IP				"  local(%s): "
 #define CLI_REQ_LOCAL_IP_DEFAULT		"192.168.101.77"
 #define CLI_REQ_ALIAS					"  alias(%s): "
@@ -107,7 +109,8 @@ public:
 	int fax_dev;
 	int ipm_dev;
 
-	long ip_xslot;
+	long gc_xslot;
+	long ipm_xslot;
 	long vox_xslot;
 	long fax_xslot;
 
@@ -133,6 +136,7 @@ public:
 		char dev_name[64] = "";
 		long request_id = 0;
 		GC_PARM_BLKP gc_parm_blkp = NULL;
+		SC_TSINFO sc_tsinfo;
 
 		sprintf(dev_name, "dxxxB1C%d", id+1);
 		vox_dev = dx_open(dev_name, NULL);
@@ -141,6 +145,20 @@ public:
 		fax_dev = fx_open(dev_name, NULL);
 		sprintf(dev_name, ":N_iptB1T%d:P_SIP:M_ipmB1C%d", id+1, id+1);
 		gc_OpenEx(&gc_dev, dev_name, EV_ASYNC, (void*)this);
+		gc_GetResourceH(gc_dev, &ipm_dev, GC_MEDIADEVICE);
+
+		sc_tsinfo.sc_numts = 1;
+		sc_tsinfo.sc_tsarrayp = &gc_xslot;
+		gc_GetXmitSlot(gc_dev, &sc_tsinfo);
+		sc_tsinfo.sc_numts = 1;
+		sc_tsinfo.sc_tsarrayp = &ipm_xslot;
+		ipm_GetXmitSlot(ipm_dev, &sc_tsinfo, EV_SYNC);
+		sc_tsinfo.sc_numts = 1;
+		sc_tsinfo.sc_tsarrayp = &vox_xslot;
+		dx_getxmitslot(vox_dev, &sc_tsinfo);
+		sc_tsinfo.sc_numts = 1;
+		sc_tsinfo.sc_tsarrayp = &fax_xslot;
+		fx_getxmitslot(fax_dev, &sc_tsinfo);
 
 		//Enabling GCEV_INVOKE_XFER_ACCEPTED Events
 		gc_util_insert_parm_val(&gc_parm_blkp, GCSET_CALLEVENT_MSK, GCACT_ADDMSK, sizeof(long), GCMSK_INVOKEXFER_ACCEPTED);
@@ -149,49 +167,61 @@ public:
 	}
 
 	void connect_voice() {
-		print("connect_voice()...");
 		SC_TSINFO sc_tsinfo;
-		gc_GetResourceH(gc_dev, &ipm_dev, GC_MEDIADEVICE);
+		print("connect_voice()...");
 		sc_tsinfo.sc_numts = 1;
-		sc_tsinfo.sc_tsarrayp = &ip_xslot;
-		gc_GetXmitSlot(gc_dev, &sc_tsinfo);
+		sc_tsinfo.sc_tsarrayp = &gc_xslot;
 		dx_listen(vox_dev, &sc_tsinfo);
 		sc_tsinfo.sc_numts = 1;
 		sc_tsinfo.sc_tsarrayp = &vox_xslot;
-		dx_getxmitslot(vox_dev, &sc_tsinfo);
 		gc_Listen(gc_dev, &sc_tsinfo, EV_SYNC);
 	}
 	
 	void connect_fax() {
+		SC_TSINFO sc_tsinfo;
 		print("connect_fax()...");
-		IP_CONNECT ip_connect;
-		GC_PARM_BLKP gc_parm_blkp = NULL;
 		gc_UnListen(gc_dev, EV_SYNC);
-		/*ip_connect.version = 0x100;
-		ip_connect.mediaHandle = ipm_dev;
-		ip_connect.faxHandle = fax_dev;
-		ip_connect.connectType = IP_FULLDUP;
-		gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_FOIP, IPPARM_T38_CONNECT, sizeof(IP_CONNECT), (void*)(&ip_connect));
-		gc_SetUserInfo(GCTGT_GCLIB_CRN, crn, gc_parm_blkp, GC_SINGLECALL);
-		gc_util_delete_parm_blk(gc_parm_blkp);*/
+		if (TRUE == USING_V17_PCM_FAX) {
+			sc_tsinfo.sc_numts = 1;
+			sc_tsinfo.sc_tsarrayp = &gc_xslot;
+			fx_listen(fax_dev, &sc_tsinfo);
+			sc_tsinfo.sc_numts = 1;
+			sc_tsinfo.sc_tsarrayp = &fax_xslot;
+			gc_Listen(gc_dev, &sc_tsinfo, EV_SYNC);
+		} else {
+			GC_PARM_BLKP gc_parm_blkp = NULL;
+			IP_CONNECT ip_connect;
+			ip_connect.version = 0x100;
+			ip_connect.mediaHandle = ipm_dev;
+			ip_connect.faxHandle = fax_dev;
+			ip_connect.connectType = IP_FULLDUP;
+			gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_FOIP, IPPARM_T38_CONNECT, sizeof(IP_CONNECT), (void*)(&ip_connect));
+			gc_SetUserInfo(GCTGT_GCLIB_CRN, crn, gc_parm_blkp, GC_SINGLECALL);
+			gc_util_delete_parm_blk(gc_parm_blkp);
+		}
 	}
 	
 	void restore_voice() {
-		print("restore_voice()...");
-		IP_CONNECT ip_connect;
-		GC_PARM_BLKP gc_parm_blkp = NULL;
 		SC_TSINFO sc_tsinfo;
+		print("restore_voice()...");
+		if (TRUE == USING_V17_PCM_FAX)	{
+			gc_UnListen(gc_dev, EV_SYNC);
+		}
 		sc_tsinfo.sc_numts = 1;
 		sc_tsinfo.sc_tsarrayp = &vox_xslot;
 		gc_Listen(gc_dev, &sc_tsinfo, EV_SYNC);
 		sc_tsinfo.sc_numts = 1;
-		sc_tsinfo.sc_tsarrayp = &ip_xslot;	
+		sc_tsinfo.sc_tsarrayp = &gc_xslot;
 		dx_listen(vox_dev, &sc_tsinfo);
-		ip_connect.version = 0x100;
-		ip_connect.mediaHandle = ipm_dev;
-		gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_FOIP, IPPARM_T38_DISCONNECT, sizeof(IP_CONNECT), (void*)(&ip_connect));
-		gc_SetUserInfo(GCTGT_GCLIB_CRN, crn, gc_parm_blkp, GC_SINGLECALL);
-		gc_util_delete_parm_blk(gc_parm_blkp);
+		if (TRUE != USING_V17_PCM_FAX) {
+			IP_CONNECT ip_connect;
+			GC_PARM_BLKP gc_parm_blkp = NULL;
+			ip_connect.version = 0x100;
+			ip_connect.mediaHandle = ipm_dev;
+			gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_FOIP, IPPARM_T38_DISCONNECT, sizeof(IP_CONNECT), (void*)(&ip_connect));
+			gc_SetUserInfo(GCTGT_GCLIB_CRN, crn, gc_parm_blkp, GC_SINGLECALL);
+			gc_util_delete_parm_blk(gc_parm_blkp);
+		}
 	}
 	
 	void set_dtmf() {
@@ -453,18 +483,22 @@ public:
 		fax_proceeding = TRUE;
 		fax_dir = dir;
 		sprintf(fax_file, "%s", NULL==file?"":file);
-		/*if (already_connect_fax)
-			response_codec_request(TRUE);
-		else {
-			connect_fax();
-			send_t38_request();
-			already_connect_fax = TRUE;
-		}*/
-		connect_fax();
-		if (DF_RX == dir) {
-			receive_fax_inner();
+
+		if (FALSE == USING_V17_PCM_FAX) {
+			if (already_connect_fax)
+				response_codec_request(TRUE);
+			else {
+				connect_fax();
+				send_t38_request();
+				already_connect_fax = TRUE;
+			}
 		} else {
-			send_fax_inner();
+			connect_fax();
+			if (DF_RX == dir) {
+				receive_fax_inner();
+			} else {
+				send_fax_inner();
+			}
 		}
 	}
 	
@@ -731,7 +765,7 @@ void enum_dev_information()
 		sprintf(board_name, "dxxxB%d", i);
 		handle = dx_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tvoice board %d has %d sub-devs.\n", i, sub_dev_count);
+		printf("\tvoice board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		for (j=1; j<=sub_dev_count; j++) {
 			sprintf(dev_name, "dxxxB%dC%d", i, j);
 			dev_handle = dx_open(dev_name, 0);
@@ -751,7 +785,7 @@ void enum_dev_information()
 		sprintf(board_name, "dtiB%d", i);
 		handle = dt_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tdti board %d has %d sub-devs.\n", i, sub_dev_count);
+		printf("\tdti board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		dt_close(handle);
 	}
 	
@@ -761,7 +795,7 @@ void enum_dev_information()
 		sprintf(board_name, "msiB%d", i);
 		handle = ms_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tmsi board %d has %d sub-devs.\n", i, sub_dev_count);
+		printf("\tmsi board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		ms_close(handle);
 	}
 
@@ -771,7 +805,7 @@ void enum_dev_information()
 		sprintf(board_name, "dcbB%d", i);
 		handle = dcb_open(board_name, 0);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tdcb board %d has %d sub-devs(DSP).\n", i, sub_dev_count);
+		printf("\tdcb board %s has %d sub-devs(DSP).\n", board_name, sub_dev_count);
 		for (j=1; j<=sub_dev_count; j++) {
 			sprintf(dev_name, "%sD%d", board_name, j);
 			dev_handle = dcb_open(dev_name, 0);
@@ -791,7 +825,7 @@ void enum_dev_information()
 		sprintf(board_name, ":N_iptB%d:P_IP", i);
 		gc_OpenEx(&handle, board_name, EV_SYNC, NULL);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tipt board %d(handle=%d) has %d sub-devs.\n", i, handle, sub_dev_count);
+		printf("\tipt board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		gc_Close(handle);
 	}
 
@@ -801,11 +835,9 @@ void enum_dev_information()
 		sprintf(board_name, ":M_ipmB%d", i);
 		gc_OpenEx(&handle, board_name, EV_SYNC, NULL);
 		sub_dev_count = ATDV_SUBDEVS(handle);
-		printf("\tipm board %d(handle=%d) has %d sub-devs.\n", i, handle, sub_dev_count);
+		printf("\tipm board %s has %d sub-devs.\n", board_name, sub_dev_count);
 		gc_Close(handle);
 	}
-
-	printf("enum_dev_information done.\n");
 }
 
 void authentication(const char* proxy_ip, const char* alias, const char* password, const char* realm)
@@ -1202,6 +1234,7 @@ BOOL analyse_cli()
 		}
 		else if (0 == strnicmp(input, CLI_STAT, strlen(CLI_STAT)))
 		{
+			enum_dev_information();
 			print_sys_status();
 		}
 	}
@@ -1311,7 +1344,8 @@ void loop()
 				break;
 			case GCEV_DISCONNECTED:
 				pch->print_call_status(meta_evt);
-				pch->restore_voice();
+				if (TRUE == pch->fax_proceeding)
+					pch->restore_voice();
 				pch->drop_call();
 				break;
 			case GCEV_EXTENSIONCMPLT:
