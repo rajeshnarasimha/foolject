@@ -17,7 +17,8 @@
 #include <ipmlib.h>
 
 #define MAX_CHANNELS					2
-#define USING_V17_PCM_FAX				TRUE
+#define HMP_SIP_PORT					8060
+#define USING_V17_PCM_FAX				FALSE
 
 #define MAKECALL_DISPLAY				"foolbear"
 #define USER_AGENT						"HMP test by foolbear"
@@ -34,16 +35,16 @@
   '%s' for play wave file, '%s' for record wave file, '%s' for stop all, \n\
   '%s' for send fax, '%s' for receive fax, '%s' for 491 REQUEST PENDING demo, \n\
   '%s' for registration, '%s' for un-registration, \n\
-  '%s' for print this help message, '%s' for print system status, \n\
-  '%s' for quit this test.\n\n"
+  '%s' for enum device information, '%s' for print system status, \n\
+  '%s' for print this help message, '%s' for quit this test.\n\n"
 #define PRINT_CLI_HELP_MSG printf(CLI_HELP_MSG, USER_AGENT, \
   CLI_MAKECALL, CLI_DROPCALL, \
   CLI_BLIND_XFER, CLI_SUPER_XFER, \
   CLI_PLAYFILE, CLI_RECORDFILE, CLI_STOP, \
   CLI_SENDFAX, CLI_RECEIVEFAX, CLI_GLAREFAX, \
   CLI_REGISTER, CLI_UNREGISTER, \
-  CLI_HELP, CLI_STAT, \
-  CLI_QUIT)
+  CLI_ENUM, CLI_STAT, \
+  CLI_HELP, CLI_QUIT)
 
 #define CLI_MAKECALL					"mc"
 #define CLI_DROPCALL					"dc"
@@ -65,6 +66,7 @@
 #define CLI_REGISTER					"reg"
 #define CLI_UNREGISTER					"unreg"
 
+#define CLI_ENUM						"enum"
 #define CLI_STAT						"stat"
 
 #define CLI_REQ_INDEX					"  index(0-%u,%u): "
@@ -72,11 +74,11 @@
 #define CLI_REQ_INDEX_2ND				"  index 2nd(0-%u,%u): "
 #define CLI_REQ_INDEX_2ND_DEFAULT		1
 #define CLI_REQ_ANI						"  ani(%s): "
-#define CLI_REQ_ANI_DEFAULT				"99@192.168.101.58"
+#define CLI_REQ_ANI_DEFAULT				"99@192.168.101.77"
 #define CLI_REQ_DNIS					"  dnis(%s): "
-#define CLI_REQ_DNIS_DEFAULT			"9999@192.168.101.58"
-#define CLI_REQ_CONTACT					"  contact(%s): "
-#define CLI_REQ_CONTACT_DEFAULT			"99@192.168.101.77"
+#define CLI_REQ_DNIS_DEFAULT			"9999@192.168.101.109"
+#define CLI_REQ_DNIS_ALIAS				"  dnis alias(%s): "
+#define CLI_REQ_DNIS_ALIAS_DEFAULT		"9999"
 #define CLI_REQ_WAVE_FILE				"  wave file(%s): "
 #define CLI_REQ_WAVE_FILE_DEFAULT		"play.wav"
 #define CLI_REQ_FAX_FILE				"  fax file(%s): "
@@ -84,7 +86,7 @@
 #define CLI_REQ_CONFIRM					"  confirm?(%s): "
 #define CLI_REQ_CONFIRM_DEFAULT			"Y"
 #define CLI_REQ_PROXY_IP				"  proxy(%s): "
-#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.58"
+#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.101"
 #define CLI_REQ_LOCAL_IP				"  local(%s): "
 #define CLI_REQ_LOCAL_IP_DEFAULT		"192.168.101.77"
 #define CLI_REQ_ALIAS					"  alias(%s): "
@@ -100,7 +102,14 @@ long board_dev = 0;
 BOOL registered = FALSE;
 CHANNEL* channls[MAX_CHANNELS] = {0}; 
 
+char proxy_ip[GC_ADDRSIZE] = "";
+char local_ip[GC_ADDRSIZE] = "";
+char alias[GC_ADDRSIZE] = "";
+char password[GC_ADDRSIZE] = "";
+char realm[GC_ADDRSIZE] = "";
+
 int get_idle_channel_id();
+void authentication(const char* proxy_ip, const char* alias, const char* password, const char* realm);
 
 class CHANNEL{
 public:
@@ -151,7 +160,7 @@ public:
 		gc_util_delete_parm_blk(gc_parm_blkp);
 	}
 
-	void connect_voice() {		
+	void connect_voice() {
 		print("connect_voice()...");
 		SC_TSINFO sc_tsinfo;
 		gc_GetResourceH(gc_dev, &ipm_dev, GC_MEDIADEVICE);
@@ -325,7 +334,7 @@ public:
 		print_gc_error_info("gc_AnswerCall", gc_AnswerCall(crn, 0, EV_ASYNC));
 	}
 	
-	void make_call(const char* ani, const char* dnis, const char* contact) {
+	void make_call(const char* ani, const char* dnis) {
 		GC_PARM_BLKP gc_parm_blkp = NULL;
 		GC_MAKECALL_BLK gc_mk_blk = {0};
 		GCLIB_MAKECALL_BLK gclib_mk_blk = {0};
@@ -337,15 +346,48 @@ public:
 
 		sprintf(sip_header, "User-Agent: %s", USER_AGENT); //proprietary header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
-		sprintf(sip_header, "From: <sip:%s>", ani); //From header
+		sprintf(sip_header, "From: %s<sip:%s>", MAKECALL_DISPLAY, ani); //From header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
-		sprintf(sip_header, "Contact: <sip:%s>", contact); //Contact header
+		sprintf(sip_header, "Contact: %s<sip:%s>", MAKECALL_DISPLAY, ani); //Contact header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
 		gc_SetUserInfo(GCTGT_GCLIB_CHAN, gc_dev, gc_parm_blkp, GC_SINGLECALL);
 		gc_util_delete_parm_blk(gc_parm_blkp);
 
 		gc_util_insert_parm_val(&gc_parm_blkp, IPSET_PROTOCOL, IPPARM_PROTOCOL_BITMASK, sizeof(int), IP_PROTOCOL_SIP);
-		gc_util_insert_parm_ref(&gc_parm_blkp, IPSET_CALLINFO, IPPARM_DISPLAY, (unsigned char)(strlen(MAKECALL_DISPLAY)+1), MAKECALL_DISPLAY);
+		gclib_mk_blk.ext_datap = gc_parm_blkp;
+		set_codec(GCTGT_GCLIB_CHAN);
+		print_gc_error_info("gc_MakeCall", gc_MakeCall(gc_dev, &crn, (char*)dnis, &gc_mk_blk, 30, EV_ASYNC));		
+		gc_util_delete_parm_blk(gc_parm_blkp);
+	}
+
+	void make_call(const char* dnis_alias) {
+		GC_PARM_BLKP gc_parm_blkp = NULL;
+		GC_MAKECALL_BLK gc_mk_blk = {0};
+		GCLIB_MAKECALL_BLK gclib_mk_blk = {0};
+		char sip_header[1024] = "";
+		char ani[MAX_ADDRESS_LEN] = "";
+		char dnis[MAX_ADDRESS_LEN] = "";
+		char contact[MAX_ADDRESS_LEN] = "";
+
+		authentication(proxy_ip, alias, password, realm);
+
+		sprintf(ani, "%s@%s", alias, proxy_ip);
+		sprintf(dnis, "%s@%s", dnis_alias, proxy_ip);
+		sprintf(contact, "%s@%s", alias, local_ip);
+		print("make_call(%s -> %s -> %s)...", ani, proxy_ip, dnis);
+		gc_mk_blk.cclib = NULL;
+		gc_mk_blk.gclib = &gclib_mk_blk;
+
+		sprintf(sip_header, "User-Agent: %s", USER_AGENT); //proprietary header
+		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
+		sprintf(sip_header, "From: %s<sip:%s>", MAKECALL_DISPLAY, ani); //From header
+		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
+		sprintf(sip_header, "Contact: %s<sip:%s>", MAKECALL_DISPLAY, contact); //Contact header
+		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
+		gc_SetUserInfo(GCTGT_GCLIB_CHAN, gc_dev, gc_parm_blkp, GC_SINGLECALL);
+		gc_util_delete_parm_blk(gc_parm_blkp);
+
+		gc_util_insert_parm_val(&gc_parm_blkp, IPSET_PROTOCOL, IPPARM_PROTOCOL_BITMASK, sizeof(int), IP_PROTOCOL_SIP);
 		gclib_mk_blk.ext_datap = gc_parm_blkp;
 		set_codec(GCTGT_GCLIB_CHAN);
 		print_gc_error_info("gc_MakeCall", gc_MakeCall(gc_dev, &crn, (char*)dnis, &gc_mk_blk, 30, EV_ASYNC));		
@@ -403,6 +445,11 @@ public:
 	void release_call() {
 		print("release_call()...");
 		print_gc_error_info("gc_ReleaseCallEx", gc_ReleaseCallEx(crn, EV_ASYNC));
+	}
+
+	void accept_modify_call() {
+		print("accept_modify_call()...");
+		print_gc_error_info("gc_AcceptModifyCall", gc_AcceptModifyCall(crn, NULL, EV_ASYNC));
 	}
 
 	void play_wave_file(const char* file) {
@@ -521,7 +568,7 @@ public:
 		unsigned short tx_coding = DF_MMR|DF_ECM;
 		int fhandle = 0;
 		unsigned long sndflag = EV_ASYNC|DF_PHASEB|DF_PHASED;		
-		fx_initstat(fax_dev, DF_TX);		
+		fx_initstat(fax_dev, DF_TX);
 		sprintf(fax_header, "FAX_HEADER_%d", id);
 		fx_setparm(fax_dev, FC_HDRUSER, (void*)fax_header);
 		sprintf(local_id, "FAX_LOCALID_%d", id);
@@ -707,8 +754,8 @@ public:
 	}
 	
 	void set_codec(int crn_or_chan) {
-		print("set_codec(g711Ulaw64k/t38UDPFax)...");
-		IP_CAPABILITY ip_cap[3];		
+		print("set_codec(g711Ulaw64k/g711Alaw64k/g729/t38UDPFax)...");
+		IP_CAPABILITY ip_cap[7];		
 		ip_cap[0].capability = GCCAP_AUDIO_g711Ulaw64k;
 		ip_cap[0].type = GCCAPTYPE_AUDIO;
 		ip_cap[0].direction = IP_CAP_DIR_LCLTRANSMIT;
@@ -721,13 +768,37 @@ public:
 		ip_cap[1].payload_type = IP_USE_STANDARD_PAYLOADTYPE;
 		ip_cap[1].extra.audio.frames_per_pkt = 20;
 		ip_cap[1].extra.audio.VAD = GCPV_DISABLE;
-		ip_cap[2].capability = GCCAP_DATA_t38UDPFax;
-		ip_cap[2].type = GCCAPTYPE_RDATA;
-		ip_cap[2].direction = IP_CAP_DIR_LCLTXRX;
-		ip_cap[2].payload_type = 0;
-		ip_cap[2].extra.data.max_bit_rate = 144;
+		ip_cap[2].capability = GCCAP_AUDIO_g711Alaw64k;
+		ip_cap[2].type = GCCAPTYPE_AUDIO;
+		ip_cap[2].direction = IP_CAP_DIR_LCLTRANSMIT;
+		ip_cap[2].payload_type = IP_USE_STANDARD_PAYLOADTYPE;
+		ip_cap[2].extra.audio.frames_per_pkt = 20;
+		ip_cap[2].extra.audio.VAD = GCPV_DISABLE;
+		ip_cap[3].capability = GCCAP_AUDIO_g711Alaw64k;
+		ip_cap[3].type = GCCAPTYPE_AUDIO;
+		ip_cap[3].direction = IP_CAP_DIR_LCLRECEIVE;
+		ip_cap[3].payload_type = IP_USE_STANDARD_PAYLOADTYPE;
+		ip_cap[3].extra.audio.frames_per_pkt = 20;
+		ip_cap[3].extra.audio.VAD = GCPV_DISABLE;
+		ip_cap[4].capability = GCCAP_AUDIO_g729AnnexAwAnnexB;
+		ip_cap[4].type = GCCAPTYPE_AUDIO;
+		ip_cap[4].direction = IP_CAP_DIR_LCLTRANSMIT;
+		ip_cap[4].payload_type = IP_USE_STANDARD_PAYLOADTYPE;
+		ip_cap[4].extra.audio.frames_per_pkt = 2;
+		ip_cap[4].extra.audio.VAD = GCPV_ENABLE;
+		ip_cap[5].capability = GCCAP_AUDIO_g729AnnexAwAnnexB;
+		ip_cap[5].type = GCCAPTYPE_AUDIO;
+		ip_cap[5].direction = IP_CAP_DIR_LCLRECEIVE;
+		ip_cap[5].payload_type = IP_USE_STANDARD_PAYLOADTYPE;
+		ip_cap[5].extra.audio.frames_per_pkt = 2;
+		ip_cap[5].extra.audio.VAD = GCPV_ENABLE;
+		ip_cap[6].capability = GCCAP_DATA_t38UDPFax;
+		ip_cap[6].type = GCCAPTYPE_RDATA;
+		ip_cap[6].direction = IP_CAP_DIR_LCLTXRX;
+		ip_cap[6].payload_type = 0;
+		ip_cap[6].extra.data.max_bit_rate = 144;
 		GC_PARM_BLKP parmblkp = NULL;
-		for (int i=0; i<3; i++)
+		for (int i=0; i<7; i++)
 			gc_util_insert_parm_ref(&parmblkp, GCSET_CHAN_CAPABILITY, IPPARM_LOCAL_CAPABILITY, sizeof(IP_CAPABILITY), &ip_cap[i]);
 		if (GCTGT_GCLIB_CRN == crn_or_chan)
 			gc_SetUserInfo(GCTGT_GCLIB_CRN, crn, parmblkp, GC_SINGLECALL);
@@ -932,15 +1003,21 @@ int get_idle_channel_id(){
 
 void print_sys_status()
 {
-	int status = 0;
+	int gc_status = 0;
+	long vox_status = 0;
+	long fax_status = 0;
 	printf("print_sys_status()...\n");
 	for (unsigned index=0; index<MAX_CHANNELS; index++) {
 		if (0 == channls[index]->crn)
-			printf("  channel %d status IDEL.\n", index);
-		else {
-			gc_GetCallState(channls[index]->crn, &status);
-			printf("  channel %d status BUSY(0x%x).\n", index, status);
-		}
+			gc_status = GCST_NULL;
+		else 
+			gc_GetCallState(channls[index]->crn, &gc_status);
+		vox_status = ATDX_STATE(channls[index]->vox_dev);
+		fax_status = ATFX_STATE(channls[index]->fax_dev);
+		printf("  channel %d status: gc %sIDLE(0x%x), vox %sIDLE(0x%x), fax %sIDLE(0x%x).\n", index, 
+			GCST_NULL==gc_status?"":"NOT ", gc_status,
+			CS_IDLE==vox_status?"":"NOT ", vox_status,
+			CS_IDLE==fax_status?"":"NOT ", fax_status);
 	}
 	printf("  %sregistered.\n", TRUE == registered?"":"NOT ");
 }
@@ -978,15 +1055,16 @@ void global_call_start()
 	
 	virt_boards[0].localIP.ip_ver = IPVER4;					// must be set to IPVER4
 	virt_boards[0].localIP.u_ipaddr.ipv4 = IP_CFG_DEFAULT;	// or specify host NIC IP address
-	virt_boards[0].h323_signaling_port = IP_CFG_DEFAULT;	// or application defined port for H.323 
-	virt_boards[0].sip_signaling_port = IP_CFG_DEFAULT;		// or application defined port for SIP
+	virt_boards[0].h323_signaling_port = IP_CFG_DEFAULT;	// or application defined port for H.323
+	virt_boards[0].sip_signaling_port = HMP_SIP_PORT;		// or application defined port for SIP
 	virt_boards[0].sup_serv_mask = IP_SUP_SERV_CALL_XFER;	// Enable SIP Transfer Feature
 	virt_boards[0].sip_msginfo_mask = IP_SIP_MSGINFO_ENABLE;// Enabling Access to SIP Header Information
+//		| IP_SIP_MIME_ENABLE;								// Enabling SIP-T/MIME feature */
 	virt_boards[0].reserved = NULL;							// must be set to NULL
-	
+
 	CCLIB_START_STRUCT cclib_start[]={{"GC_DM3CC_LIB", NULL}, {"GC_H3R_LIB", &cclib_start_data}, {"GC_IPM_LIB", NULL}};
 	gclib_start.num_cclibs = 3;
-	gclib_start.cclib_list = cclib_start;		
+	gclib_start.cclib_list = cclib_start;
 	gc_Start(&gclib_start);
 }
 
@@ -1072,14 +1150,9 @@ BOOL analyse_cli()
 	unsigned index_2nd = 0;
 	char ani[GC_ADDRSIZE] = "";
 	char dnis[GC_ADDRSIZE] = "";
-	char contact[GC_ADDRSIZE] = "";
+	char dnis_alias[GC_ADDRSIZE] = "";
 	char file[MAX_PATH] = "";
 	char confirm[2] = "";
-	char proxy_ip[GC_ADDRSIZE] = "";
-	char local_ip[GC_ADDRSIZE] = "";
-	char alias[GC_ADDRSIZE] = "";
-	char password[GC_ADDRSIZE] = "";
-	char realm[GC_ADDRSIZE] = "";
 	
 	if (kbhit()) {
 		if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
@@ -1094,24 +1167,33 @@ BOOL analyse_cli()
 		} 
 		else if (0 == strnicmp(input, CLI_MAKECALL, strlen(CLI_MAKECALL))) 
 		{
-			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
-			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
-			index = atoi(input);
-			if (index>=MAX_CHANNELS || index<0)
-				index = CLI_REQ_INDEX_DEFAULT;
-			printf(CLI_REQ_ANI, CLI_REQ_ANI_DEFAULT);
-			if (gets_quit_if_esc(ani, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
-			if (0 == ani[0])
-				sprintf(ani, "%s", CLI_REQ_ANI_DEFAULT);
-			printf(CLI_REQ_DNIS, CLI_REQ_DNIS_DEFAULT);
-			if (gets_quit_if_esc(dnis, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
-			if (0 == dnis[0])
-				sprintf(dnis, "%s", CLI_REQ_DNIS_DEFAULT);
-			printf(CLI_REQ_CONTACT, CLI_REQ_CONTACT_DEFAULT);
-			if (gets_quit_if_esc(contact, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
-			if (0 == contact[0])
-				sprintf(contact, "%s", CLI_REQ_CONTACT_DEFAULT);
-			channls[index]->make_call(ani, dnis, contact);
+			if (registered) {
+				printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
+				if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+				index = atoi(input);
+				if (index>=MAX_CHANNELS || index<0)
+					index = CLI_REQ_INDEX_DEFAULT;
+				printf(CLI_REQ_DNIS_ALIAS, CLI_REQ_DNIS_ALIAS_DEFAULT);
+				if (gets_quit_if_esc(dnis_alias, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+				if (0 == dnis_alias[0])
+					sprintf(dnis_alias, "%s", CLI_REQ_DNIS_ALIAS_DEFAULT);
+				channls[index]->make_call(dnis_alias);
+			} else {
+				printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
+				if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+				index = atoi(input);
+				if (index>=MAX_CHANNELS || index<0)
+					index = CLI_REQ_INDEX_DEFAULT;
+				printf(CLI_REQ_ANI, CLI_REQ_ANI_DEFAULT);
+				if (gets_quit_if_esc(ani, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+				if (0 == ani[0])
+					sprintf(ani, "%s", CLI_REQ_ANI_DEFAULT);
+				printf(CLI_REQ_DNIS, CLI_REQ_DNIS_DEFAULT);
+				if (gets_quit_if_esc(dnis, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+				if (0 == dnis[0])
+					sprintf(dnis, "%s", CLI_REQ_DNIS_DEFAULT);
+				channls[index]->make_call(ani, dnis);
+			}
 		} 
 		else if (0 == strnicmp(input, CLI_DROPCALL, strlen(CLI_DROPCALL))) 
 		{
@@ -1243,10 +1325,12 @@ BOOL analyse_cli()
 		else if (0 == strnicmp(input, CLI_UNREGISTER, strlen(CLI_UNREGISTER)))
 		{
 			unregistration();
+		} else if (0 == strnicmp(input, CLI_ENUM, strlen(CLI_ENUM)))
+		{
+			enum_dev_information();
 		}
 		else if (0 == strnicmp(input, CLI_STAT, strlen(CLI_STAT)))
 		{
-			enum_dev_information();
 			print_sys_status();
 		}
 	}
@@ -1363,6 +1447,10 @@ void loop()
 			case GCEV_EXTENSIONCMPLT:
 			case GCEV_EXTENSION:
 				pch->process_extension(meta_evt);
+				break;
+			case GCEV_REQ_MODIFY_CALL:
+				pch->process_extension(meta_evt);
+				pch->accept_modify_call();
 				break;
 			case GCEV_RELEASECALL:
 				pch->already_connect_fax = FALSE;
