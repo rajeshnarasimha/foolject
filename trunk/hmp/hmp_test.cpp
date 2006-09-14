@@ -15,13 +15,14 @@
 #include <gcip_defs.h>
 #include <gcip.h>
 #include <ipmlib.h>
+#include <gcipmlib.h>
 
 #define MAX_CHANNELS					2
 #define HMP_SIP_PORT					8060
 #define USING_V17_PCM_FAX				FALSE
 
-#define MAKECALL_DISPLAY				"foolbear"
-#define USER_AGENT						"HMP test by foolbear"
+#define USER_DISPLAY					"foolbear"
+#define USER_AGENT						"HMP test"
 
 #define CLI_BACK						"back"
 
@@ -29,21 +30,24 @@
 #define CLI_QUIT_MSG					"HMP test quitting...\n"
 
 #define CLI_HELP						"help"
-#define CLI_HELP_MSG					"%s, please enter the command: \n\
+#define CLI_HELP_MSG					"%s by %s, please enter the command: \n\
   '%s' for make call, '%s' for drop call, \n\
   '%s' for blind transfer, '%s' for supervised transfer, \n\
   '%s' for play wave file, '%s' for record wave file, '%s' for stop all, \n\
   '%s' for send fax, '%s' for receive fax, '%s' for 491 REQUEST PENDING demo, \n\
+  '%s' for request modify call, \n\
   '%s' for registration, '%s' for un-registration, \n\
-  '%s' for enum device information, '%s' for print system status, \n\
+  '%s' for enum device information, '%s' for enum device capabilities', \n\
+  '%s' for print system status, \n\
   '%s' for print this help message, '%s' for quit this test.\n\n"
-#define PRINT_CLI_HELP_MSG printf(CLI_HELP_MSG, USER_AGENT, \
+#define PRINT_CLI_HELP_MSG printf(CLI_HELP_MSG, USER_AGENT, USER_DISPLAY, \
   CLI_MAKECALL, CLI_DROPCALL, \
   CLI_BLIND_XFER, CLI_SUPER_XFER, \
   CLI_PLAYFILE, CLI_RECORDFILE, CLI_STOP, \
   CLI_SENDFAX, CLI_RECEIVEFAX, CLI_GLAREFAX, \
+  CLI_MODIFYCALL, \
   CLI_REGISTER, CLI_UNREGISTER, \
-  CLI_ENUM, CLI_STAT, \
+  CLI_ENUM, CLI_CAPS, CLI_STAT, \
   CLI_HELP, CLI_QUIT)
 
 #define CLI_MAKECALL					"mc"
@@ -61,12 +65,15 @@
 #define CLI_GLAREFAX					"gf"
 #define CLI_GLAREFAX_MSG				"Be sure Call Connected between channel '0' with '1'.\n"
 
+#define CLI_MODIFYCALL					"modify"
+
 #define CLI_STOP						"stop"
 
 #define CLI_REGISTER					"reg"
 #define CLI_UNREGISTER					"unreg"
 
 #define CLI_ENUM						"enum"
+#define CLI_CAPS						"caps"
 #define CLI_STAT						"stat"
 
 #define CLI_REQ_INDEX					"  index(0-%u,%u): "
@@ -86,7 +93,7 @@
 #define CLI_REQ_CONFIRM					"  confirm?(%s): "
 #define CLI_REQ_CONFIRM_DEFAULT			"Y"
 #define CLI_REQ_PROXY_IP				"  proxy(%s): "
-#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.101"
+#define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.58"
 #define CLI_REQ_LOCAL_IP				"  local(%s): "
 #define CLI_REQ_LOCAL_IP_DEFAULT		"192.168.101.77"
 #define CLI_REQ_ALIAS					"  alias(%s): "
@@ -108,6 +115,10 @@ char alias[GC_ADDRSIZE] = "";
 char password[GC_ADDRSIZE] = "";
 char realm[GC_ADDRSIZE] = "";
 
+ALARM_PARM_LIST alarm_parm_list;
+IPM_QOS_THRESHOLD_INFO iqti;
+
+void enum_support_capabilities();
 int get_idle_channel_id();
 void authentication(const char* proxy_ip, const char* alias, const char* password, const char* realm);
 
@@ -167,7 +178,7 @@ public:
 		sc_tsinfo.sc_numts = 1;
 		sc_tsinfo.sc_tsarrayp = &gc_xslot;
 		gc_GetXmitSlot(gc_dev, &sc_tsinfo);
-		dx_listen(vox_dev, &sc_tsinfo);
+		dx_listenEx(vox_dev, &sc_tsinfo, EV_SYNC);
 		sc_tsinfo.sc_numts = 1;
 		sc_tsinfo.sc_tsarrayp = &vox_xslot;
 		dx_getxmitslot(vox_dev, &sc_tsinfo);
@@ -215,7 +226,7 @@ public:
 		gc_Listen(gc_dev, &sc_tsinfo, EV_SYNC);
 		sc_tsinfo.sc_numts = 1;
 		sc_tsinfo.sc_tsarrayp = &gc_xslot;
-		dx_listen(vox_dev, &sc_tsinfo);
+		dx_listenEx(vox_dev, &sc_tsinfo, EV_SYNC);
 		if (TRUE != USING_V17_PCM_FAX) {
 			IP_CONNECT ip_connect;
 			GC_PARM_BLKP gc_parm_blkp = NULL;
@@ -279,7 +290,7 @@ public:
 	void print_call_status(METAEVENT meta_evt) {
 		GC_INFO call_status_info = {0};
 		gc_ResultInfo(&meta_evt, &call_status_info);		
-		print("CALLSTATUS Info: \n GC InfoValue:0x%hx-%s,\n CCLibID:%i-%s, CC InfoValue:0x%lx-%s,\n Additional Info:%s",
+		print("CALLSTATUS Info: \n  GC InfoValue:0x%hx-%s,\n  CCLibID:%i-%s, CC InfoValue:0x%lx-%s,\n  Additional Info:%s",
 			call_status_info.gcValue, call_status_info.gcMsg,
 			call_status_info.ccLibId, call_status_info.ccLibName,
 			call_status_info.ccValue, call_status_info.ccMsg, 
@@ -346,9 +357,9 @@ public:
 
 		sprintf(sip_header, "User-Agent: %s", USER_AGENT); //proprietary header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
-		sprintf(sip_header, "From: %s<sip:%s>", MAKECALL_DISPLAY, ani); //From header
+		sprintf(sip_header, "From: %s<sip:%s>", USER_DISPLAY, ani); //From header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
-		sprintf(sip_header, "Contact: %s<sip:%s>", MAKECALL_DISPLAY, ani); //Contact header
+		sprintf(sip_header, "Contact: %s<sip:%s:%d>", USER_DISPLAY, ani, HMP_SIP_PORT); //Contact header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
 		gc_SetUserInfo(GCTGT_GCLIB_CHAN, gc_dev, gc_parm_blkp, GC_SINGLECALL);
 		gc_util_delete_parm_blk(gc_parm_blkp);
@@ -380,9 +391,9 @@ public:
 
 		sprintf(sip_header, "User-Agent: %s", USER_AGENT); //proprietary header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
-		sprintf(sip_header, "From: %s<sip:%s>", MAKECALL_DISPLAY, ani); //From header
+		sprintf(sip_header, "From: %s<sip:%s>", USER_DISPLAY, ani); //From header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
-		sprintf(sip_header, "Contact: %s<sip:%s>", MAKECALL_DISPLAY, contact); //Contact header
+		sprintf(sip_header, "Contact: %s<sip:%s:%d>", USER_DISPLAY, contact, HMP_SIP_PORT); //Contact header
 		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
 		gc_SetUserInfo(GCTGT_GCLIB_CHAN, gc_dev, gc_parm_blkp, GC_SINGLECALL);
 		gc_util_delete_parm_blk(gc_parm_blkp);
@@ -445,6 +456,16 @@ public:
 	void release_call() {
 		print("release_call()...");
 		print_gc_error_info("gc_ReleaseCallEx", gc_ReleaseCallEx(crn, EV_ASYNC));
+	}
+
+	void req_modify_call() {
+		GC_PARM_BLKP gc_parm_blkp = NULL;
+		char sip_header[1024] = "";
+		sprintf(sip_header, "Contact: %s by %s<sip:%s@%s:%d>", USER_AGENT, USER_DISPLAY, alias, local_ip, HMP_SIP_PORT); //Contact header
+		print("req_modify_call(->%s)...", sip_header);
+		gc_util_insert_parm_ref_ex(&gc_parm_blkp, IPSET_SIP_MSGINFO, IPPARM_SIP_HDR, (unsigned long)(strlen(sip_header)+1), sip_header);
+		print_gc_error_info("gc_ReqModifyCall", gc_ReqModifyCall(crn, gc_parm_blkp, EV_ASYNC));
+		gc_util_delete_parm_blk(gc_parm_blkp);
 	}
 
 	void accept_modify_call() {
@@ -745,7 +766,7 @@ public:
 					print("  Got unknown extension parmID %d", gc_parm_datap->parm_ID);
 					break;
 				}
-				break;				
+				break;
 			default:
 				print("Got unknown set_ID(%d).", gc_parm_datap->set_ID);
 				break;
@@ -754,7 +775,7 @@ public:
 	}
 	
 	void set_codec(int crn_or_chan) {
-		print("set_codec(g711Ulaw64k/g711Alaw64k/g729/t38UDPFax)...");
+		print("set_codec(g711U[103]/g711A[101]/g729[116/118/119/120]/t38[12])...");
 		IP_CAPABILITY ip_cap[7];		
 		ip_cap[0].capability = GCCAP_AUDIO_g711Ulaw64k;
 		ip_cap[0].type = GCCAPTYPE_AUDIO;
@@ -805,6 +826,24 @@ public:
 		else
 			gc_SetUserInfo(GCTGT_GCLIB_CHAN, gc_dev, parmblkp, GC_SINGLECALL);
 		gc_util_delete_parm_blk(parmblkp);
+	}
+
+	void set_alarm() {
+		print("set_alarm()...");
+		print_gc_error_info("gc_SetAlarmNotifyAll", gc_SetAlarmNotifyAll(ipm_dev, ALARM_SOURCE_ID_NETWORK_ID, ALARM_NOTIFY));
+		print_gc_error_info("gc_SetAlarmParm", gc_SetAlarmParm(ipm_dev, ALARM_SOURCE_ID_NETWORK_ID, ParmSetID_qosthreshold_alarm, &alarm_parm_list, EV_SYNC));
+	}
+
+	void print_alarm_info(METAEVENT meta_evt) {
+		long alarm_number = 0;
+		char* alarm_name = NULL;
+		unsigned long alarm_source_object_id = 0;
+		char* alarm_source_object_name = NULL;
+		gc_AlarmNumber(&meta_evt, &alarm_number); // Will be of type TYPE_LAN_DISCONNECT = 0x01 or TYPE_LAN_DISCONNECT + 0x10 (LAN connected).
+		gc_AlarmName(&meta_evt, &alarm_name); // Will be "Lan Cable Disconnected" or "Lan cable connected".
+		gc_AlarmSourceObjectID(&meta_evt, &alarm_source_object_id); // Will usually be 7.
+		gc_AlarmSourceObjectName(&meta_evt, &alarm_source_object_name); // Will be IPCCLIBAsoId.
+		print("alarm: %s(0x%lx) occurred on ASO %s(%d)", alarm_name, alarm_number, alarm_source_object_name, (int) alarm_source_object_id);
 	}
 
 	void close() {
@@ -923,6 +962,25 @@ void enum_dev_information()
 	}
 }
 
+void enum_support_capabilities() 
+{
+	int count = 0;
+	IPM_CAPABILITIES* caps = NULL;	
+	printf("enum_support_capabilities()...\n");
+	for (int index=0; index<MAX_CHANNELS; index++) {
+		count = ipm_GetCapabilities(channls[index]->ipm_dev, CAPABILITY_CODERLIST, 0, NULL, EV_SYNC);
+		caps = (IPM_CAPABILITIES*)malloc(sizeof(IPM_CAPABILITIES)*count);
+		count = ipm_GetCapabilities(channls[index]->ipm_dev, CAPABILITY_CODERLIST, count, caps, EV_SYNC);
+		channls[index]->print("support 1890 Coder: ");
+		channls[index]->print("  [Type\tCoder\tFrSize\tFr/Pkt\tVAD]");
+		for (int i=0; i<count; i++) 
+			channls[index]->print("  [%d\t%d\t%d\t%d\t%d]", 
+				caps[i].Coder.unCoderPayloadType, caps[i].Coder.eCoderType, caps[i].Coder.eFrameSize, 
+				caps[i].Coder.unFramesPerPkt, caps[i].Coder.eVadEnable);
+		free(caps);
+	}
+}
+
 void authentication(const char* proxy_ip, const char* alias, const char* password, const char* realm)
 {
 	GC_PARM_BLKP gc_parm_blkp = NULL;
@@ -960,7 +1018,7 @@ void registration(const char* proxy_ip, const char* local_ip, const char* alias,
 		memset((void*)&register_address, 0, sizeof(IP_REGISTER_ADDRESS));
 		sprintf(register_address.reg_server, "%s", proxy_ip);// Request-URI
 		sprintf(register_address.reg_client, "%s@%s", alias, proxy_ip);// To header field
-		sprintf(contact, "sip:%s@%s", alias, local_ip);// Contact header field
+		sprintf(contact, "sip:%s@%s:%d", alias, local_ip, HMP_SIP_PORT);// Contact header field
 		register_address.time_to_live = 3600;
 		register_address.max_hops = 30;
 
@@ -1082,9 +1140,29 @@ void pre_test()
 
 	// Enable Alarm notification on the board handle with generic ASO ID
 	gc_SetAlarmNotifyAll(board_dev, ALARM_SOURCE_ID_NETWORK_ID, ALARM_NOTIFY);
+	iqti.unCount=2;
+	iqti.QoSThresholdData[0].eQoSType = QOSTYPE_LOSTPACKETS;
+	iqti.QoSThresholdData[0].unFaultThreshold = 20;
+	iqti.QoSThresholdData[0].unDebounceOn = 10000;
+	iqti.QoSThresholdData[0].unDebounceOff = 10000;
+	iqti.QoSThresholdData[0].unTimeInterval = 1000;
+	iqti.QoSThresholdData[0].unPercentSuccessThreshold = 60;
+	iqti.QoSThresholdData[0].unPercentFailThreshold = 40;
+	iqti.QoSThresholdData[1].eQoSType = QOSTYPE_JITTER;
+	iqti.QoSThresholdData[1].unFaultThreshold = 60;
+	iqti.QoSThresholdData[1].unDebounceOn = 20000;
+	iqti.QoSThresholdData[1].unDebounceOff = 60000;
+	iqti.QoSThresholdData[1].unTimeInterval = 5000;
+	iqti.QoSThresholdData[1].unPercentSuccessThreshold = 60;
+	iqti.QoSThresholdData[1].unPercentFailThreshold = 40;
+	alarm_parm_list.n_parms = 1;
+	alarm_parm_list.alarm_parm_fields[0].alarm_parm_data.pstruct = (void *) &iqti;
+	gc_SetAlarmParm(board_dev, ALARM_SOURCE_ID_NETWORK_ID, ParmSetID_qosthreshold_alarm, &alarm_parm_list, EV_SYNC);
 
 	//setting T.38 fax server operating mode: IP MANUAL mode
-	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_MANUAL_MODE);
+	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_T38_MANUAL_MODE);
+	//access to SIP re-INVITE requests
+//	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_T38_MANUAL_MODIFY_MODE);
 	
 	//Enabling and Disabling Unsolicited Notification Events
 	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_EXTENSIONEVT_MSK, GCACT_ADDMSK, sizeof(long), 
@@ -1298,6 +1376,15 @@ BOOL analyse_cli()
 				index = CLI_REQ_INDEX_DEFAULT;
 			channls[index]->stop();
 		} 
+		else if (0 == strnicmp(input, CLI_MODIFYCALL, strlen(CLI_MODIFYCALL))) 
+		{
+			printf(CLI_REQ_INDEX, MAX_CHANNELS-1, CLI_REQ_INDEX_DEFAULT);
+			if (gets_quit_if_esc(input, GC_ADDRSIZE-1)) { PRINT_CLI_HELP_MSG; return TRUE; }
+			index = atoi(input);
+			if (index>=MAX_CHANNELS || index<0)
+				index = CLI_REQ_INDEX_DEFAULT;
+			channls[index]->req_modify_call();
+		} 
 		else if (0 == strnicmp(input, CLI_REGISTER, strlen(CLI_REGISTER)))
 		{
 			printf(CLI_REQ_PROXY_IP, CLI_REQ_PROXY_IP_DEFAULT);
@@ -1328,6 +1415,10 @@ BOOL analyse_cli()
 		} else if (0 == strnicmp(input, CLI_ENUM, strlen(CLI_ENUM)))
 		{
 			enum_dev_information();
+		}
+		else if (0 == strnicmp(input, CLI_CAPS, strlen(CLI_CAPS)))
+		{
+			enum_support_capabilities();
 		}
 		else if (0 == strnicmp(input, CLI_STAT, strlen(CLI_STAT)))
 		{
@@ -1369,32 +1460,32 @@ void loop()
 		gc_GetMetaEventEx(&meta_evt, event_handle);
 		if (meta_evt.flags & GCME_GC_EVENT) {
 
-			//for Host Signaling LAN Disconnection Alarm
-			if (evt_dev == board_dev && GCEV_ALARM == meta_evt.evttype) {
-				print_alarm_info(meta_evt);
-			}
+			if (evt_dev == board_dev) {
+				printf("board got GC event : %s\n", GCEV_MSG(evt_code));
 
-			//for proxy register
-			if (evt_dev == board_dev && GCEV_SERVICERESP == meta_evt.evttype) {
-				gc_parm_blkp = (GC_PARM_BLKP)(meta_evt.extevtdatap);
-				
-				while(gc_parm_datap = gc_util_next_parm(gc_parm_blkp, gc_parm_datap)) {
-					if (IPSET_REG_INFO == gc_parm_datap->set_ID) {					
-						if (IPPARM_REG_STATUS == gc_parm_datap->parm_ID) {
-							value = (int)(gc_parm_datap->value_buf[0]);
-							switch(value) {
-							case IP_REG_CONFIRMED:
-								printf("IPSET_REG_INFO/IPPARM_REG_STATUS: IP_REG_CONFIRMED\n");
-								break;
-							case IP_REG_REJECTED:
-								printf("IPSET_REG_INFO/IPPARM_REG_STATUS: IP_REG_REJECTED\n");
-								break;
-							default:
-								break;
+				if (GCEV_ALARM == meta_evt.evttype) {//for alarm
+					print_alarm_info(meta_evt);
+				} else if (GCEV_SERVICERESP == meta_evt.evttype) {//for proxy register
+					gc_parm_blkp = (GC_PARM_BLKP)(meta_evt.extevtdatap);
+					
+					while(gc_parm_datap = gc_util_next_parm(gc_parm_blkp, gc_parm_datap)) {
+						if (IPSET_REG_INFO == gc_parm_datap->set_ID) {					
+							if (IPPARM_REG_STATUS == gc_parm_datap->parm_ID) {
+								value = (int)(gc_parm_datap->value_buf[0]);
+								switch(value) {
+								case IP_REG_CONFIRMED:
+									printf("  IPSET_REG_INFO/IPPARM_REG_STATUS: IP_REG_CONFIRMED\n");
+									break;
+								case IP_REG_REJECTED:
+									printf("  IPSET_REG_INFO/IPPARM_REG_STATUS: IP_REG_REJECTED\n");
+									break;
+								default:
+									break;
+								}
+							} else if (IPPARM_REG_SERVICEID == gc_parm_datap->parm_ID) {
+								value = (int)(gc_parm_datap->value_buf[0]);
+								printf("  IPSET_REG_INFO/IPPARM_REG_SERVICEID: 0x%x\n", value);
 							}
-						} else if (IPPARM_REG_SERVICEID == gc_parm_datap->parm_ID) {
-							value = (int)(gc_parm_datap->value_buf[0]);
-							printf("IPSET_REG_INFO/IPPARM_REG_SERVICEID: 0x%x\n", value);
 						}
 					}
 				}
@@ -1412,6 +1503,7 @@ void loop()
 			case GCEV_OPENEX:
 				pch->set_dtmf();
 				pch->connect_voice();
+				pch->set_alarm();
 				break;
 			case GCEV_UNBLOCKED:
 				pch->wait_call();
@@ -1470,6 +1562,9 @@ void loop()
 				break;
 			case GCEV_INIT_XFER:
 				pch->super_xfer();
+				break;
+			case GCEV_ALARM:
+				pch->print_alarm_info(meta_evt);
 				break;
 			default:
 				pch->print_call_status(meta_evt);
