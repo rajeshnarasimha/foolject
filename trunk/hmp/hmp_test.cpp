@@ -18,8 +18,10 @@
 #include <gcipmlib.h>
 
 #define MAX_CHANNELS					2
-#define HMP_SIP_PORT					8060
+#define HMP_SIP_PORT					5060
+
 #define USING_V17_PCM_FAX				FALSE
+#define USING_MODIFY_MODE				FALSE
 
 #define USER_DISPLAY					"foolbear"
 #define USER_AGENT						"HMP test"
@@ -81,11 +83,11 @@
 #define CLI_REQ_INDEX_2ND				"  index 2nd(0-%u,%u): "
 #define CLI_REQ_INDEX_2ND_DEFAULT		1
 #define CLI_REQ_ANI						"  ani(%s): "
-#define CLI_REQ_ANI_DEFAULT				"99@192.168.101.77"
+#define CLI_REQ_ANI_DEFAULT				"30@192.168.101.30"
 #define CLI_REQ_DNIS					"  dnis(%s): "
-#define CLI_REQ_DNIS_DEFAULT			"9999@192.168.101.109"
+#define CLI_REQ_DNIS_DEFAULT			"31@192.168.101.30"
 #define CLI_REQ_DNIS_ALIAS				"  dnis alias(%s): "
-#define CLI_REQ_DNIS_ALIAS_DEFAULT		"9999"
+#define CLI_REQ_DNIS_ALIAS_DEFAULT		"31"
 #define CLI_REQ_WAVE_FILE				"  wave file(%s): "
 #define CLI_REQ_WAVE_FILE_DEFAULT		"play.wav"
 #define CLI_REQ_FAX_FILE				"  fax file(%s): "
@@ -95,11 +97,11 @@
 #define CLI_REQ_PROXY_IP				"  proxy(%s): "
 #define CLI_REQ_PROXY_IP_DEFAULT		"192.168.101.58"
 #define CLI_REQ_LOCAL_IP				"  local(%s): "
-#define CLI_REQ_LOCAL_IP_DEFAULT		"192.168.101.77"
+#define CLI_REQ_LOCAL_IP_DEFAULT		"192.168.101.30"
 #define CLI_REQ_ALIAS					"  alias(%s): "
-#define CLI_REQ_ALIAS_DEFAULT			"99"
+#define CLI_REQ_ALIAS_DEFAULT			"30"
 #define CLI_REQ_PASSWORD				"  password(%s): "
-#define CLI_REQ_PASSWORD_DEFAULT		"99"
+#define CLI_REQ_PASSWORD_DEFAULT		"30"
 #define CLI_REQ_REALM					"  realm(%s): "
 #define CLI_REQ_REALM_DEFAULT			"ewings"
 
@@ -1159,10 +1161,13 @@ void pre_test()
 	alarm_parm_list.alarm_parm_fields[0].alarm_parm_data.pstruct = (void *) &iqti;
 	gc_SetAlarmParm(board_dev, ALARM_SOURCE_ID_NETWORK_ID, ParmSetID_qosthreshold_alarm, &alarm_parm_list, EV_SYNC);
 
-	//setting T.38 fax server operating mode: IP MANUAL mode
-	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_T38_MANUAL_MODE);
-	//access to SIP re-INVITE requests
-//	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_T38_MANUAL_MODIFY_MODE);
+	if (FALSE == USING_MODIFY_MODE) {
+		//setting T.38 fax server operating mode: IP MANUAL mode
+		gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_T38_MANUAL_MODE);
+	} else {
+		//access to SIP re-INVITE requests
+		gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_CONFIG, IPPARM_OPERATING_MODE, sizeof(long), IP_T38_MANUAL_MODIFY_MODE);
+	}
 	
 	//Enabling and Disabling Unsolicited Notification Events
 	gc_util_insert_parm_val(&gc_parm_blk_p, IPSET_EXTENSIONEVT_MSK, GCACT_ADDMSK, sizeof(long), 
