@@ -20,8 +20,8 @@
 #define MAX_CHANNELS					2
 #define HMP_SIP_PORT					5060
 
-#define USING_V17_PCM_FAX				FALSE
-#define USING_MODIFY_MODE				FALSE
+#define USING_V17_PCM_FAX				TRUE
+#define USING_MODIFY_MODE				TRUE
 
 #define USER_DISPLAY					"foolbear"
 #define USER_AGENT						"HMP test"
@@ -727,7 +727,7 @@ public:
 				}
 				if (sizeof(IP_CAPABILITY) == gc_parm_datap->value_size) {
 					ip_capp = (IP_CAPABILITY*)(gc_parm_datap->value_buf);
-					print("    stream codec infomation for TX: capability(%d), dir(%d), frames_per_pkt(%d), VAD(%d)", 
+					print("    stream codec infomation: capability(%d), dir(%d), frames_per_pkt(%d), VAD(%d)", 
 						ip_capp->capability, ip_capp->direction, ip_capp->extra.audio.frames_per_pkt, ip_capp->extra.audio.VAD);
 				}
 				break;
