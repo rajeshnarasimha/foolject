@@ -32,8 +32,8 @@ LINE* line_1 = NULL;
 
 long media_ready_count = 0;
 
-const char video_play[] = "p.vid";
-const char audio_play[] = "p.pcm";
+const char video_play[] = "show.vid";//"p.vid";
+const char audio_play[] = "show.pcm";//"p.pcm";
 const char video_record[] = "r.vid";
 const char audio_record[] = "r.pcm";
 
@@ -83,6 +83,7 @@ public:
 		ipm_handle = ipm_Open(ipm_name, 0, EV_ASYNC);
 		sr_setparm(dx_handle, SR_USERCONTEXT, (void*)&lp);
 		sr_setparm(ipm_handle, SR_USERCONTEXT, (void*)&lp);
+		dx_setevtmsk(dx_handle, DM_DIGITS);
 	}
 
 	void close() {
@@ -108,14 +109,85 @@ public:
 		ipm_GetLocalMediaInfo( ipm_handle, &media_info, EV_ASYNC);
 	}
 
+	void dx_listen_to_ipm() {
+		long ts = 0;
+		SC_TSINFO scts;
+		Log("dx_listen_to_ipm()...");
+		scts.sc_numts = 1;
+		scts.sc_tsarrayp = &ts;
+		ipm_GetXmitSlot(ipm_handle, &scts, EV_SYNC);
+		scts.sc_numts = 1;
+		*(scts.sc_tsarrayp) = ts;
+		dx_listen(dx_handle, &scts);
+	}
+
+	void ipm_listen_to_dx() {
+		long ts = 0;
+		SC_TSINFO scts;
+		Log("ipm_listen_to_dx()...");
+		scts.sc_numts = 1;
+		scts.sc_tsarrayp = &ts;
+		dx_getxmitslot(dx_handle, &scts);
+		scts.sc_numts = 1;
+		*(scts.sc_tsarrayp) = ts;
+		ipm_Listen(ipm_handle, &scts, EV_SYNC);
+	}
+	
+	void ipm_unlisten_to_dx() {
+		Log("ipm_unlisten_to_dx()...");
+		ipm_UnListen(ipm_handle, EV_SYNC);
+	}
+
+	void send_dtmf() {
+		Log("send_dtmf()...");
+		dx_dial(dx_handle, "0123456789*#abcd", (DX_CAP *)NULL, EV_ASYNC);
+	}
+
 	void notify_both_media_ready() {
 		sr_putevt(ipm_handle, USER_EVT_BOTH_MEDIA_READY, 0, NULL, 0);
+	}
+
+	void set_dtmf_mode(eIPM_DTMFXFERMODE dtmf_mode) {
+		IPM_PARM_INFO parm_info;
+		Log("set_dtmf_mode(%s)...", dtmf_mode==DTMFXFERMODE_INBAND?"INBAND":dtmf_mode==DTMFXFERMODE_RFC2833?"RFC2833":"OUTOFBAND");
+		parm_info.eParm = PARMCH_DTMFXFERMODE;
+		parm_info.pvParmValue = &dtmf_mode;
+		ipm_SetParm(ipm_handle, &parm_info, EV_SYNC);// set dtmf mode
+		if (DTMFXFERMODE_RFC2833 == dtmf_mode) {
+			int pl_type = 101;
+			parm_info.eParm = PARMCH_RFC2833EVT_TX_PLT;// set the TX Payload Type
+			parm_info.pvParmValue = &pl_type;
+			ipm_SetParm(ipm_handle, &parm_info, EV_SYNC);
+			parm_info.eParm = PARMCH_RFC2833EVT_RX_PLT;
+			parm_info.pvParmValue = &pl_type;
+			ipm_SetParm(ipm_handle, &parm_info, EV_SYNC);
+		}
+	}
+
+	void send_digits() {
+		IPM_DIGIT_INFO digit_info;
+		Log("send_digits()...");
+		digit_info.eDigitType = DIGIT_ALPHA_NUMERIC;//DIGIT_SIGNAL
+		digit_info.eDigitDirection = DIGIT_TDM;
+		strcpy(digit_info.cDigits,"abcd*#1234567890");
+		digit_info.unNumberOfDigits = 16;
+		ipm_SendDigits(ipm_handle, &digit_info, EV_ASYNC);
+	}
+
+	void receive_digits() {
+		IPM_DIGIT_INFO digit_info;
+		Log("receive_digits()...");
+		digit_info.eDigitType = DIGIT_ALPHA_NUMERIC;
+		digit_info.eDigitDirection = DIGIT_TDM;
+		ipm_ReceiveDigits(ipm_handle, &digit_info, EV_ASYNC);
 	}
 
 	void start_media() {
 		IPM_MEDIA_INFO media_info;
 		LINE* peer = (1 == index)?line_0:line_1;
 		Log("start_media()...");
+		set_dtmf_mode(DTMFXFERMODE_INBAND);//DTMFXFERMODE_INBAND;//DTMFXFERMODE_RFC2833;//DTMFXFERMODE_OUTOFBAND
+		receive_digits();
 		media_info.unCount = 8;
 		media_info.MediaData[0].eMediaType = MEDIATYPE_AUDIO_REMOTE_CODER_INFO;
 		media_info.MediaData[0].mediaInfo.CoderInfo.eCoderType = CODER_TYPE_G711ULAW64K;
@@ -237,8 +309,21 @@ public:
 		mm_Stop(mm_handle, stop, NULL);
 	}
 
-	void Handle(long evt_dev, long evt_code, void* evt_datap, long evt_len) {
+	void stop_play() {
+		Log("stop_play()...");
+		MM_STOP stop[2];
+		stop[0].unVersion	= MM_STOP_VERSION_0;
+		stop[0].ItemChain	= EMM_ITEM_CONT;
+		stop[0].ItemType	= EMM_STOP_VIDEO_PLAY;
+		stop[1].unVersion	= MM_STOP_VERSION_0;
+		stop[1].ItemChain	= EMM_ITEM_EOT;
+		stop[1].ItemType	= EMM_STOP_AUDIO_PLAY;
+		mm_Stop(mm_handle, stop, NULL);
+	}
+
+	void Handle(long evt_dev, long evt_code, DX_CST* evt_datap, long evt_len) {
 		IPM_MEDIA_INFO* media_infop;
+		IPM_DIGIT_INFO* digit_infop;
 		unsigned int i = 0;
 		LINE* peer = (1 == index)?line_0:line_1;
 
@@ -247,6 +332,14 @@ public:
 			{
 			case TDX_CST:
 				Log("TDX_CST");
+				if (DE_DIGITS == evt_datap->cst_event) {
+					Log("DE_DIGITS: '%c'.", (char)evt_datap->cst_data);
+				}
+				break;
+			case TDX_DIAL:
+				Log("TDX_DIAL");
+				ipm_unlisten_to_dx();
+//				send_digits();
 				break;
 			default:
 				Log("unknow event(%d) for dx device(%d).", evt_code, evt_dev);
@@ -265,6 +358,8 @@ public:
 				break;
 			case MMEV_PLAY_ACK:
 				Log("MMEV_PLAY_ACK");
+				ipm_listen_to_dx();
+				send_dtmf();
 				break;
 			case MMEV_PLAY_ACK_FAIL:
 				Log("MMEV_PLAY_ACK_FAIL");
@@ -344,12 +439,13 @@ public:
 					    break;
 					}
 				}
+				Log("local ip = %s, audio port = %u, video port = %u.", local_ip, audio_port, video_port);
+				dx_listen_to_ipm();
 				if (++media_ready_count == 2) {
 					media_ready_count = 0;
 					line_0->notify_both_media_ready();
 					line_1->notify_both_media_ready();
 				}
-				Log("local ip = %s, audio port = %u, video port = %u.", local_ip, audio_port, video_port);
 				break;
 			case USER_EVT_BOTH_MEDIA_READY:
 				start_media();
@@ -366,6 +462,17 @@ public:
 				Log("IPMEV_STOPPED");
 				dev_Disconnect(ipm_handle, EV_ASYNC);
 				dev_Disconnect(mm_handle, EV_ASYNC);
+				break;
+			case IPMEV_SEND_DIGITS:
+				Log("IPMEV_SEND_DIGITS");
+				break;
+			case IPMEV_RECEIVE_DIGITS:
+				Log("IPMEV_RECEIVE_DIGITS");
+				break;
+			case IPMEV_DIGITS_RECEIVED:
+				Log("IPMEV_DIGITS_RECEIVED");
+				digit_infop = (IPM_DIGIT_INFO*)evt_datap;
+				Log("number of digits = %d, digit=%s.", digit_infop->unNumberOfDigits, digit_infop->cDigits);
 				break;
 			case IPMEV_ERROR:
 				Log("IPMEV_ERROR");
@@ -386,6 +493,7 @@ int main() {
 	long evt_code = 0;
 	void* evt_datap = NULL;
 	long evt_len = 0;
+	char input = 'a';
 
 	line_0 = new LINE(0, "dxxxB1C1", "mmB1C1", "ipmB1C1");
 	line_1 = new LINE(1, "dxxxB1C2", "mmB1C2", "ipmB1C2");
@@ -397,9 +505,12 @@ int main() {
 		do {			
 			timeout = sr_waitevt( 500 );
 			if (_kbhit()) {
-				if (_getche() == 'q') {
+				input = _getche();
+				if (input == 'q') {
 					Log("quit...");
 					goto QUIT;
+				} else if (input == 's'){
+					line_0->stop_play();
 				}
 			}
 		} while(timeout == SR_TMOUT);
@@ -410,7 +521,7 @@ int main() {
 		evt_len = (long)sr_getevtlen();
 
 		sr_getparm(evt_dev, SR_USERCONTEXT, (void *)&lp);
-		lp->Handle(evt_dev, evt_code, evt_datap, evt_len);
+		lp->Handle(evt_dev, evt_code, (DX_CST*)evt_datap, evt_len);
 	}
 
 QUIT:
