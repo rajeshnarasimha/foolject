@@ -342,10 +342,9 @@ public:
 //				send_digits();
 				break;
 			default:
-				Log("unknow event(%d) for dx device(%d).", evt_code, evt_dev);
+				Log("unknown event(%d) for dx device(%d).", evt_code, evt_dev);
 				break;
 			}
-			;
 		} else if (evt_dev == mm_handle) {
 			switch(evt_code)
 			{
@@ -407,7 +406,7 @@ public:
 				Log("mm.DMEV_DISCONNECT");
 				break;
 			default:
-				Log("unknow event(%d) for mm device(%d).", evt_code, evt_dev);
+				Log("unknown event(%d) for mm device(%d).", evt_code, evt_dev);
 				break;
 			}
 		} else if (evt_dev == ipm_handle) {
@@ -478,7 +477,7 @@ public:
 				Log("IPMEV_ERROR");
 				break;
 			default:
-				Log("unknow event(%d) for ipm device(%d).", evt_code, evt_dev);
+				Log("unknown event(%d) for ipm device(%d).", evt_code, evt_dev);
 				break;
 			}
 		} else
