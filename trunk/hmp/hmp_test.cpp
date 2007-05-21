@@ -20,8 +20,8 @@
 #define MAX_CHANNELS					2
 #define HMP_SIP_PORT					5060
 
-#define USING_V17_PCM_FAX				TRUE
-#define USING_MODIFY_MODE				TRUE
+#define USING_V17_PCM_FAX				FALSE
+#define USING_MODIFY_MODE				FALSE
 
 #define USER_DISPLAY					"foolbear"
 #define USER_AGENT						"HMP test"
