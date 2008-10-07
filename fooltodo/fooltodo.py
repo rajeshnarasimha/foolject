@@ -1,3 +1,4 @@
+import cgi
 import wsgiref.handlers
 
 from google.appengine.api import users
@@ -5,21 +6,27 @@ from google.appengine.ext import webapp
 
 class MainPage(webapp.RequestHandler):
   def get(self):
-    user = users.get_current_user()
+    self.response.out.write("""
+      <html>
+        <body>
+          <form action="/sign" method="post">
+            <div><textarea name="content" rows="3" cols="60"></textarea></div>
+            <div><input type="submit" value="Sign Guestbook"></div>
+          </form>
+        </body>
+      </html>""")
 
-    if user:
-      self.response.headers['Content-Type'] = 'text/plain'
-      self.response.out.write('Hello, ' + user.nickname() + ', and your e-mail is ' + user.email() + '.')
-      admin = users.is_current_user_admin()
-      if admin:
-      	self.response.out.write('\nYou are administrator.')
-      self.response.out.write('\n <a ref=\'' + users.create_logout_url(self.request.uri) + '\'>Logout</a>')
-    else:
-      self.redirect(users.create_login_url(self.request.uri))
+
+class Guestbook(webapp.RequestHandler):
+  def post(self):
+    self.response.out.write('<html><body>You wrote:<pre>')
+    self.response.out.write(cgi.escape(self.request.get('content')))
+    self.response.out.write('</pre></body></html>')
 
 def main():
   application = webapp.WSGIApplication(
-                                       [('/', MainPage)],
+                                       [('/', MainPage),
+                                        ('/sign', Guestbook)],
                                        debug=True)
   wsgiref.handlers.CGIHandler().run(application)
 
