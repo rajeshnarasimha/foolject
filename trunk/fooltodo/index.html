@@ -1,20 +1,26 @@
 <html>
   <head>
+  	<meta http-equiv="content-type" content="text/html; charset=utf-8"/>
   	<title>Fool To-do List</title>
     <link type="text/css" rel="stylesheet" href="/css/main.css" />
   </head>	
   <body>
+    <center><b>{{ caption }}</b></center>
     {% for greeting in greetings %}
+      <div><img src="img?img_id={{greeting.key}}"/>
       {% if greeting.author %}
         <b>{{ greeting.author.nickname }}</b> wrote:
       {% else %}
        An anonymous person wrote:
-      {% endif %}
+      {% endif %}</div>
       <blockquote>{{ greeting.content|escape }}</blockquote>
     {% endfor %}
 
-    <form action="/sign" method="post">
+    <form action="/sign" enctype="multipart/form-data" method="post">
+      <div><label>Message:</label></div>
       <div><textarea name="content" rows="3" cols="60"></textarea></div>
+      <div><label>Avatar:</label></div>
+      <div><input type="file" name="img"/></div>
       <div><input type="submit" value="Sign Guestbook"></div>
     </form>
 
