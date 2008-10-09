@@ -9,10 +9,12 @@
     {% for greeting in greetings %}
       <div><img src="img?img_id={{greeting.key}}"/>
       {% if greeting.author %}
-        <b>{{ greeting.author.nickname }}</b> wrote:
+        <b>{{ greeting.author.nickname }}</b> wrote
       {% else %}
-       An anonymous person wrote:
-      {% endif %}</div>
+        An anonymous person wrote
+      {% endif %}
+       (at {{greeting.date}}) :
+      </div>
       <blockquote>{{ greeting.content|escape }}</blockquote>
     {% endfor %}
 
