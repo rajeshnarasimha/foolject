@@ -4,6 +4,7 @@ import wsgiref.handlers
 
 from google.appengine.api import users
 from google.appengine.api import images
+from google.appengine.api import mail
 from google.appengine.ext import db
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp import template
@@ -16,7 +17,7 @@ class Greeting(db.Model):
 
 class MainPage(webapp.RequestHandler):
   def get(self):
-    #greetings_query = Greeting.all().order('-date')    
+    #greetings_query = Greeting.all().order('-date')
     #greetings = greetings_query.fetch(10)
     greetings = db.GqlQuery("Select * from Greeting Order by date DESC limit 10")
     #greetings = db.GqlQuery("Select * from Greeting where author=:author Order by date DESC limit 10", author=users.get_current_user())
@@ -47,6 +48,19 @@ class Guestbook(webapp.RequestHandler):
       avatar =  images.resize(image, 32, 32)
       greeting.avatar = db.Blob(avatar)
     greeting.put()
+    if users.get_current_user():
+      message = mail.EmailMessage()
+      message.sender = users.get_current_user().email()
+      message.to = "greatfoolbear@gmail.com"
+      message.subject = "Message left in your guest book"
+      message.body = """
+Dear Administrator,
+
+%s Leave a message in your guest book. Please visit http://fooltodo.appspot.com to check it out.
+
+Fool To-do Team
+""" % users.get_current_user().nickname()
+      message.send()
     self.redirect('/')
     
 class Image (webapp.RequestHandler):
