@@ -22,6 +22,7 @@
 
 #include "talk/base/thread.h"
 #include "talk/base/messagequeue.h"
+#include <stdio.h>
 
 class CallClient;
 

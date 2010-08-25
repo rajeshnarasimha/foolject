@@ -36,6 +36,7 @@ extern "C" {
 }
 #endif // POSIX
 
+#include <stdlib.h>
 #include "talk/base/host.h"
 #include "talk/base/logging.h"
 #include "talk/base/network.h"
@@ -54,7 +55,7 @@ namespace {
 
 void FatalError(const std::string& name, int err) {
   PLOG(LERROR, err) << name;
-  std::exit(1);
+  exit(1);
 }
 
 }
