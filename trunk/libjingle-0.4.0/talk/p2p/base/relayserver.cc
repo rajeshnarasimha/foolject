@@ -31,6 +31,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <stdio.h>
 
 #ifdef POSIX
 extern "C" {
@@ -40,8 +41,8 @@ extern "C" {
 
 namespace cricket {
 
-// By default, we require a ping every 90 seconds.
-const int MAX_LIFETIME = 15 * 60 * 1000;
+// By default, we require a ping every 9 seconds.
+const int MAX_LIFETIME = 9 * 1000;
 
 // The number of bytes in each of the usernames we use.
 const uint32 USERNAME_LENGTH = 16;
@@ -319,7 +320,7 @@ void RelayServer::HandleStunAllocate(
       lifetime = talk_base::_min(lifetime, lifetime_attr->value() * 1000);
 
     binding = new RelayServerBinding(this, username, "0", lifetime);
-    binding->SignalTimeout.connect(this, &RelayServer::OnTimeout);
+//    binding->SignalTimeout.connect(this, &RelayServer::OnTimeout);
     bindings_[username] = binding;
 
     if (log_bindings_) {
@@ -464,30 +465,52 @@ void RelayServer::HandleStunSend(
 }
 
 void RelayServer::AddConnection(RelayServerConnection* conn) {
-  assert(connections_.find(conn->addr_pair()) == connections_.end());
-  connections_[conn->addr_pair()] = conn;
+  if (connections_.find(conn->addr_pair()) == connections_.end())
+    connections_[conn->addr_pair()] = conn;
 }
 
 void RelayServer::RemoveConnection(RelayServerConnection* conn) {
   ConnectionMap::iterator iter = connections_.find(conn->addr_pair());
-  assert(iter != connections_.end());
-  connections_.erase(iter);
+  if (iter != connections_.end())
+    connections_.erase(iter);
 }
 
 void RelayServer::RemoveBinding(RelayServerBinding* binding) {
   BindingMap::iterator iter = bindings_.find(binding->username());
-  assert(iter != bindings_.end());
-  bindings_.erase(iter);
+  if (iter != bindings_.end()) {
+    bindings_.erase(iter);
 
-  if (log_bindings_) {
-    std::cout << "Removed a binding: " << bindings_.size() << " remaining"
+    if (log_bindings_) {
+      std::cout << "Removed a binding: " << bindings_.size() << " remaining"
               << std::endl;
+    }
   }
 }
 
+/*
 void RelayServer::OnTimeout(RelayServerBinding* binding) {
   // This call will result in all of the necessary clean-up.
   delete binding;
+}*/
+
+const uint32 MSG_BINDING_TIMEOUT = 1;
+
+void RelayServer::OnMessage(talk_base::Message *pmsg)
+{	
+  RelayServerBinding* binding = NULL;
+  switch(pmsg->message_id)
+  {
+    case MSG_BINDING_TIMEOUT:
+      binding = talk_base::UseMessageData<RelayServerBinding*>(pmsg->pdata);
+      printf("OnMessage(MSG_BINDING_TIMEOUT, 0x%x).\n", binding);
+      if(binding) {
+        delete binding;
+        binding = NULL;
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 RelayServerConnection::RelayServerConnection(
@@ -658,7 +681,9 @@ void RelayServerBinding::OnMessage(talk_base::Message *pmsg) {
     // If the lifetime timeout has been exceeded, then send a signal.
     // Otherwise, just keep waiting.
     if (talk_base::Time() >= last_used_ + lifetime_) {
-      SignalTimeout(this);
+      //SignalTimeout(this);
+      server_->thread()->Post(
+        (talk_base::MessageHandler*)server_, MSG_BINDING_TIMEOUT, WrapMessageData(this));
     } else {
       server_->thread()->PostDelayed(lifetime_, this, MSG_LIFETIME_TIMER);
     }
