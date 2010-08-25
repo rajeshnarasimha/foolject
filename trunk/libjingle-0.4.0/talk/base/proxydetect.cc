@@ -5,6 +5,7 @@
 #include <shlobj.h>
 #endif
 
+#include <string.h>
 #include "talk/base/httpcommon.h"
 #include "talk/base/httpcommon-inl.h"
 #include "talk/base/proxydetect.h"

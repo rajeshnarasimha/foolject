@@ -25,7 +25,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
+#include "string.h"
 #include "talk/base/common.h"
 #include "talk/base/streamutils.h"
 

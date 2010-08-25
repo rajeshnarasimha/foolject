@@ -29,6 +29,8 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <string>
+#include <string.h>
+#include <stdio.h>
 #include "talk/base/basictypes.h"
 #include "talk/base/common.h"
 #include "talk/base/stream.h"

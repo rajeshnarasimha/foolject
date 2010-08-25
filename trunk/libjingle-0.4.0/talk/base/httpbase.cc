@@ -151,10 +151,12 @@ HttpParser::process_line(const char* line, size_t len, HttpError& err) {
       } while ((value < eol) && isspace(static_cast<unsigned char>(*value)));
       size_t vlen = eol - value;
       if (MatchHeader(line, nlen, HH_CONTENT_LENGTH)) {
-        if (sscanf(value, "%d", &data_size_) != 1) {
+        unsigned int data_size_temp;
+        if (sscanf(value, "%d", &data_size_temp) != 1) {
           err = HE_PROTOCOL;
           break;
         }
+        data_size_ = data_size_temp;
       } else if (MatchHeader(line, nlen, HH_TRANSFER_ENCODING)) {
         if ((vlen == 7) && (_strnicmp(value, "chunked", 7) == 0)) {
           chunked_ = true;

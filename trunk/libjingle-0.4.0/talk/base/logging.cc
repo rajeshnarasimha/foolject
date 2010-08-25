@@ -33,6 +33,8 @@
 
 #include <iostream>
 #include <iomanip>
+#include <stdio.h>
+#include <string.h>
 
 #include "talk/base/logging.h"
 #include "talk/base/stream.h"

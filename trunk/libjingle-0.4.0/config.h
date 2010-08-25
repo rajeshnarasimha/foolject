@@ -23,10 +23,10 @@
 #define HAVE_GLIB 1
 
 /* Defined when we have ilbc codec lib */
-/* #undef HAVE_ILBC */
+#define HAVE_ILBC 1
 
 /* Define to 1 if you have the <iLBC_decode.h> header file. */
-/* #undef HAVE_ILBC_DECODE_H */
+#define HAVE_ILBC_DECODE_H 1
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #define HAVE_INTTYPES_H 1
@@ -41,10 +41,10 @@
 #define HAVE_SPEEX 1
 
 /* Define to 1 if you have the <speex.h> header file. */
-/* #undef HAVE_SPEEX_H */
+#define HAVE_SPEEX_H 1
 
 /* Define to 1 if you have the <speex/speex.h> header file. */
-#define HAVE_SPEEX_SPEEX_H 1
+/* #undef HAVE_SPEEX_SPEEX_H */
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1

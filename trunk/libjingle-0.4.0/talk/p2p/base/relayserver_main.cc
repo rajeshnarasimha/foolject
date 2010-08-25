@@ -53,13 +53,13 @@ int main(int argc, char **argv) {
   
   talk_base::AsyncUDPSocket* int_socket = talk_base::CreateAsyncUDPSocket(pthMain->socketserver());
   if (int_socket->Bind(int_addr) < 0) {
-    std::cerr << "bind: " << std::strerror(errno) << std::endl;
+    std::cerr << "bind: " << strerror(errno) << std::endl;
     return 1;
   }
 
   talk_base::AsyncUDPSocket* ext_socket = talk_base::CreateAsyncUDPSocket(pthMain->socketserver());
   if (ext_socket->Bind(ext_addr) < 0) {
-    std::cerr << "bind: " << std::strerror(errno) << std::endl;
+    std::cerr << "bind: " << strerror(errno) << std::endl;
     return 1;
   }
 

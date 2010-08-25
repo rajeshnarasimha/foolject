@@ -19,6 +19,7 @@
 
 #include <time.h>
 #include <iomanip>
+#include <stdio.h>
 #include "talk/base/logging.h"
 #include "talk/base/physicalsocketserver.h"
 #include "talk/base/ssladapter.h"
