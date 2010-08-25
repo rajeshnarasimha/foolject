@@ -45,9 +45,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  assert(talk_base::LocalHost().networks().size() >= 2);
-  talk_base::SocketAddress int_addr(talk_base::LocalHost().networks()[1]->ip(), 5000);
-  talk_base::SocketAddress ext_addr(talk_base::LocalHost().networks()[1]->ip(), 5001);
+  //assert(talk_base::LocalHost().networks().size() >= 2);
+  talk_base::SocketAddress int_addr(talk_base::LocalHost().networks()[0]->ip(), 5000);
+  talk_base::SocketAddress ext_addr(talk_base::LocalHost().networks()[0]->ip(), 5001);
   
   talk_base::Thread *pthMain = talk_base::Thread::Current(); 
   

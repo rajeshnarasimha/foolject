@@ -45,7 +45,7 @@ class RelayServerConnection;
 
 // Relays traffic between connections to the server that are "bound" together.
 // All connections created with the same username/password are bound together.
-class RelayServer : public sigslot::has_slots<> {
+class RelayServer : public sigslot::has_slots<>, public talk_base::MessageHandler {
 public:
   // Creates a server, which will use this thread to post messages to itself.
   RelayServer(talk_base::Thread* thread);
@@ -67,6 +67,9 @@ public:
   // know that these addresses represent a relay server.
   void AddExternalSocket(talk_base::AsyncPacketSocket* socket);
   void RemoveExternalSocket(talk_base::AsyncPacketSocket* socket);
+
+  // MessageHandler:
+  void OnMessage(talk_base::Message *pmsg);
 
 private:
   typedef std::vector<talk_base::AsyncPacketSocket*> SocketList;
