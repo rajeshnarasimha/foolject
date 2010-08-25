@@ -105,12 +105,13 @@ bool UnixFilesystem::DeleteFileI(const Pathname &filename) {
 
 bool UnixFilesystem::GetTemporaryFolderI(Pathname &pathname, bool create,
 				    const std::string *append) {
-  pathname.SetPathname("/tmp");
+  pathname.SetPathname("/tmp/");
   if (append) {
     pathname.AppendFolder(*append);
     if (create)
       CreateFolder(pathname);
   }
+  return true;
 }
 
 std::string UnixFilesystem::TempFilenameI(const Pathname &dir, const std::string &prefix) {
