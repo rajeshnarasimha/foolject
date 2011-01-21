@@ -40,14 +40,15 @@ extern "C" {
 using namespace cricket;
 
 int main(int argc, char **argv) {
-  if (argc != 1) {
-    std::cerr << "usage: relayserver" << std::endl;
+  if (argc != 2) {
+    std::cerr << "usage: relayserver {network interface id}" << std::endl;
     return 1;
   }
 
+  int nic_id = atoi(argv[1]);
   //assert(talk_base::LocalHost().networks().size() >= 2);
-  talk_base::SocketAddress int_addr(talk_base::LocalHost().networks()[0]->ip(), 5000);
-  talk_base::SocketAddress ext_addr(talk_base::LocalHost().networks()[0]->ip(), 5001);
+  talk_base::SocketAddress int_addr(talk_base::LocalHost().networks()[nic_id]->ip(), 5000);
+  talk_base::SocketAddress ext_addr(talk_base::LocalHost().networks()[nic_id]->ip(), 5001);
   
   talk_base::Thread *pthMain = talk_base::Thread::Current(); 
   
