@@ -40,12 +40,13 @@ extern "C" {
 using namespace cricket;
 
 int main(int argc, char* argv[]) {
-  if (argc != 1) {
-    std::cerr << "usage: stunserver" << std::endl;
+  if (argc != 2) {
+    std::cerr << "usage: stunserver {network interface id}" << std::endl;
     return 1;
   }
 
-  talk_base::SocketAddress server_addr(talk_base::LocalHost().networks()[1]->ip(), 7000);
+  int nic_id = atoi(argv[1]);
+  talk_base::SocketAddress server_addr(talk_base::LocalHost().networks()[nic_id]->ip(), 7000);
 
   talk_base::Thread *pthMain = talk_base::Thread::Current(); 
   
